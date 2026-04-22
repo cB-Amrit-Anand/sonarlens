@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <title>SonarQube AI Fixer</title>
+    {{STYLES}}
+</head>
+<body>
+    <div class="app">
+
+        <!-- ── Header ── -->
+        <header class="header">
+            <div class="header-brand">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                </svg>
+                <span>SonarQube AI Fixer</span>
+            </div>
+            <div class="nav" role="tablist">
+                <button class="nav-btn active" data-page="config" role="tab">Config</button>
+                <button class="nav-btn" data-page="prs" role="tab">Pull Requests</button>
+                <button class="nav-btn" data-page="issues" role="tab">Issues</button>
+            </div>
+        </header>
+
+        <!-- ── Toast container ── -->
+        <div id="toast-container" aria-live="polite"></div>
+
+        <!-- ══════════════════════════════════════
+             PAGE 1 — Configuration
+        ══════════════════════════════════════ -->
+        <div id="page-config" class="page active" role="tabpanel">
+            <div class="card">
+                <h2>Configuration</h2>
+                <p class="hint">Credentials are stored securely in VS Code's secret storage and restored automatically on next open.</p>
+
+                <div id="missing-props-warning" class="warning-box hidden">
+                    <strong>sonar-project.properties not found</strong> — create it in your project root:
+                    <pre>sonar.sonarQubeUri=https://sonarcloud.io
+sonar.projectKey=your-project-key</pre>
+                </div>
+
+                <form id="config-form" autocomplete="off">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sonar-uri">SonarQube / SonarCloud URI <span class="required">*</span></label>
+                            <input id="sonar-uri" type="url" placeholder="from sonar-project.properties" readonly />
+                            <span class="hint">Read from <code>sonar-project.properties</code></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="project-key">Project Key <span class="required">*</span></label>
+                            <input id="project-key" type="text" placeholder="from sonar-project.properties" readonly />
+                            <span class="hint">Read from <code>sonar-project.properties</code></span>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sonar-token">SonarQube Token <span class="required">*</span></label>
+                            <input id="sonar-token" type="password" placeholder="squ_xxxxxxxxxxxx" required />
+                        </div>
+                        <div class="form-group">
+                            <label for="ai-api-key">OpenAI API Key</label>
+                            <input id="ai-api-key" type="password" placeholder="sk-… (optional — required only for AI fixes)" />
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save Configuration</button>
+                        <button type="button" id="btn-test-conn" class="btn btn-secondary">
+                            <span class="btn-text">Test Connection</span>
+                            <span class="spinner hidden"></span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════
+             PAGE 2 — Pull Requests
+        ══════════════════════════════════════ -->
+        <div id="page-prs" class="page" role="tabpanel">
+            <div class="card">
+                <div class="page-header">
+                    <h2>Pull Requests</h2>
+                    <button id="btn-fetch-prs" class="btn btn-primary">
+                        <span class="btn-text">Fetch PRs</span>
+                        <span class="spinner hidden"></span>
+                    </button>
+                </div>
+                <div id="prs-container">
+                    <div class="empty-state">Click "Fetch PRs" to load pull requests from SonarQube.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════
+             PAGE 3 — Issues
+        ══════════════════════════════════════ -->
+        <div id="page-issues" class="page" role="tabpanel">
+            <div class="card">
+                <div class="page-header">
+                    <h2>Issues <span id="pr-badge" class="badge hidden"></span></h2>
+                    <div class="page-actions">
+                        <button id="btn-fix-selected" class="btn btn-primary hidden">Fix Selected (<span id="sel-count">0</span>)</button>
+                        <div class="export-wrap">
+                            <button id="btn-export" class="btn btn-secondary">Export ▾</button>
+                            <div id="export-menu" class="dropdown-menu hidden">
+                                <button data-export="json">Export JSON</button>
+                                <button data-export="csv">Export CSV / Excel</button>
+                                <button data-export="prompt">Export with AI Prompt</button>
+                            </div>
+                        </div>
+                        <button id="btn-fix-all-low" class="btn btn-warning">Fix All Low Severity</button>
+                    </div>
+                </div>
+
+                <!-- Filter bar -->
+                <div id="issue-filters" class="filter-bar">
+                    <div class="filter-group">
+                        <span class="filter-label">Severity</span>
+                        <div class="sev-checkboxes">
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="BLOCKER"  checked><span class="sev sev-BLOCKER">BLOCKER</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="CRITICAL" checked><span class="sev sev-CRITICAL">CRITICAL</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="MAJOR"    checked><span class="sev sev-MAJOR">MAJOR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="MINOR"    checked><span class="sev sev-MINOR">MINOR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="INFO"     checked><span class="sev sev-INFO">INFO</span></label>
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <span class="filter-label">File</span>
+                        <input id="file-search" type="text" class="filter-input" placeholder="Filter by file path…" />
+                    </div>
+                </div>
+
+                <div id="issues-container">
+                    <div class="empty-state">Select a Pull Request on the PR page to load its issues.</div>
+                </div>
+
+                <div id="pagination" class="pagination hidden">
+                    <button id="btn-prev" class="btn btn-secondary" disabled>&#8592; Prev</button>
+                    <span id="page-info" class="page-info">Page 1 of 1</span>
+                    <button id="btn-next" class="btn btn-secondary">Next &#8594;</button>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /.app -->
+
+    {{SCRIPT}}
+</body>
+</html>

@@ -1,0 +1,68 @@
+{
+  "sonarqube_apis": [
+    {
+      "name": "List Pull Requests",
+      "method": "GET",
+      "endpoint": "/api/project_pull_requests/list",
+      "params": {
+        "project": "The project key (sonar.projectKey)"
+      },
+      "auth": "Basic — token as username, empty password",
+      "response_key": "pullRequests",
+      "used_for": "Fetching all pull requests for a project",
+      "notes": "Returns array of PR objects with key, title, branch, status.qualityGateStatus, analysisDate"
+    },
+    {
+      "name": "Search Issues",
+      "method": "GET",
+      "endpoint": "/api/issues/search",
+      "params": {
+        "componentKeys": "The project key",
+        "pullRequest": "PR key to scope issues to a specific pull request",
+        "p": "Page number (1-based)",
+        "ps": "Page size (max 500, default 100)"
+      },
+      "auth": "Basic — token as username, empty password",
+      "response_key": "issues",
+      "pagination": {
+        "sonarqube_v9_and_below": "top-level fields: total, p, ps",
+        "sonarqube_v10_plus_and_sonarcloud": "paging object: { total, pageIndex, pageSize }"
+      },
+      "used_for": "Fetching issues for a pull request with pagination",
+      "notes": "Extension handles both pagination formats automatically"
+    },
+    {
+      "name": "Do Issue Transition",
+      "method": "POST",
+      "endpoint": "/api/issues/do_transition",
+      "content_type": "application/x-www-form-urlencoded",
+      "body": {
+        "issue": "Issue key",
+        "transition": "resolve"
+      },
+      "auth": "Basic — token as username, empty password",
+      "used_for": "Marking an issue as resolved in SonarQube"
+    },
+    {
+      "name": "List Project Branches",
+      "method": "GET",
+      "endpoint": "/api/project_branches/list",
+      "params": {
+        "project": "The project key"
+      },
+      "auth": "Basic — token as username, empty password",
+      "response_key": "branches",
+      "used_for": "Listing branches (available but not yet surfaced in UI)",
+      "notes": "Silently returns [] on error — some SonarQube editions do not expose this endpoint"
+    },
+    {
+      "name": "System Ping",
+      "method": "GET",
+      "endpoint": "/api/system/ping",
+      "params": {},
+      "auth": "Basic — token as username, empty password",
+      "used_for": "Testing connectivity and authentication",
+      "notes": "Returns plain text 'pong'. Some SonarCloud configurations may return 404 — extension treats any non-error response as a successful connection"
+    }
+  ]
+}
