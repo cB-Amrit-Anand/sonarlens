@@ -65,6 +65,25 @@ input[readonly] { opacity: .55; cursor: default; }
 
 .form-actions { display: flex; gap: 8px; margin-top: 6px; }
 
+/* ── Settings header ─────────────────────────────────────────────────────── */
+.settings-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+}
+.settings-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+#btn-back {
+    font-size: 12px;
+    padding: 2px 6px;
+}
+
 /* ── Warning box ─────────────────────────────────────────────────────────── */
 .warning-box {
     background: rgba(232,168,56,.1);
@@ -258,15 +277,48 @@ td { padding: 7px 8px; vertical-align: middle; }
     white-space: nowrap;
     display: block;
 }
+.msg-cell { max-width: 220px; }
 .cell-msg {
     font-size: 11px;
-    max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     display: block;
 }
+.msg-expanded .cell-msg { white-space: normal; overflow: visible; text-overflow: unset; }
+.msg-expanded .cell-file { white-space: normal; overflow: visible; text-overflow: unset; max-width: none; word-break: break-all; }
+
+.issue-link {
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+}
+.issue-link:hover { text-decoration: underline; }
+
+.more-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 10px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+}
+.more-btn:hover { text-decoration: underline; }
+
+.cell-sr { font-size: 10px; color: var(--text-muted); width: 28px; text-align: center; }
 .action-cell { display: flex; gap: 4px; align-items: center; }
+
+.page-size-select {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 11px;
+    padding: 2px 5px;
+    cursor: pointer;
+    margin-left: 8px;
+}
 
 /* ── Filter bar ──────────────────────────────────────────────────────────── */
 .filter-bar {
@@ -276,7 +328,39 @@ td { padding: 7px 8px; vertical-align: middle; }
     padding: 7px 8px;
     border-bottom: 1px solid var(--border);
 }
-.sev-checkboxes { display: flex; gap: 4px; flex-wrap: wrap; }
+.filter-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.sev-dropdown-wrap { position: relative; }
+#sev-dropdown-menu,
+#stat-dropdown-menu { left: 0; right: auto; min-width: 150px; }
+
+/* rows inside both filter dropdowns */
+#sev-dropdown-menu .sev-check,
+#stat-dropdown-menu .sev-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 11px;
+}
+#sev-dropdown-menu .sev-check:hover,
+#stat-dropdown-menu .sev-check:hover { background: var(--bg-hover); }
+
+/* inside dropdowns: strip chip background, keep the colour */
+#stat-dropdown-menu .stat,
+#sev-dropdown-menu .sev {
+    background: none;
+    padding: 0;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 0;
+    letter-spacing: .3px;
+}
+
 .sev-check { display: flex; align-items: center; gap: 3px; cursor: pointer; }
 .sev-check input { cursor: pointer; width: 12px; height: 12px; }
 .filter-input {

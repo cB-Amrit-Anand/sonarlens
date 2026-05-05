@@ -16,6 +16,11 @@
     ══════════════════════════════════════ -->
     <div id="page-settings" class="page active">
 
+        <div class="settings-header">
+            <button id="btn-back" class="icon-btn" title="Back to main view">&#8592; Back</button>
+            <span class="settings-title">Settings</span>
+        </div>
+
         <div id="missing-props-warning" class="warning-box hidden">
             <strong>sonar-project.properties not found</strong><br>
             Create it in your project root:
@@ -25,26 +30,28 @@ sonar.projectKey=your-project-key</pre>
 
         <div class="form-group">
             <label for="sonar-uri">SonarQube URI <span class="required">*</span></label>
-            <input id="sonar-uri" type="url" placeholder="from sonar-project.properties" readonly />
-            <span class="hint">Read from sonar-project.properties</span>
+            <input id="sonar-uri" type="url" placeholder="https://sonarcloud.io" />
+            <span class="hint">Base URL of your SonarQube or SonarCloud instance. Auto-filled from <code>sonar-project.properties</code> if present — you can override it here.</span>
         </div>
         <div class="form-group">
             <label for="project-key">Project Key <span class="required">*</span></label>
-            <input id="project-key" type="text" placeholder="from sonar-project.properties" readonly />
-            <span class="hint">Read from sonar-project.properties</span>
+            <input id="project-key" type="text" placeholder="my-org_my-repo" />
+            <span class="hint">Unique identifier for your project in SonarQube. Found on your project's main page. Auto-filled from <code>sonar-project.properties</code> if present.</span>
         </div>
         <div class="form-group">
             <label for="sonar-token">SonarQube Token <span class="required">*</span></label>
             <input id="sonar-token" type="password" placeholder="squ_xxxxxxxxxxxx" />
+            <span class="hint">User token from SonarQube → My Account → Security → Generate Token. Needs at least <em>Browse</em> permission on the project.</span>
         </div>
         <div class="form-group">
             <label for="ai-api-key">OpenAI API Key</label>
-            <input id="ai-api-key" type="password" placeholder="sk-… (optional, for AI fixes)" />
+            <input id="ai-api-key" type="password" placeholder="sk-…" />
+            <span class="hint">Optional. Required only for AI-powered fixes. Get it from <em>platform.openai.com → API Keys</em>. Leave blank to use the extension for viewing issues only.</span>
         </div>
         <div class="form-actions">
             <button id="btn-save-config" class="btn btn-primary">Save</button>
             <button id="btn-test-conn" class="btn btn-secondary">
-                <span class="btn-text">Test</span>
+                <span class="btn-text">Test Connection</span>
                 <span class="spinner hidden"></span>
             </button>
         </div>
@@ -59,6 +66,7 @@ sonar.projectKey=your-project-key</pre>
         <div class="tab-bar">
             <button class="tab-btn active" data-tab="prs">Pull Requests</button>
             <button class="tab-btn" data-tab="issues">Issues</button>
+            <span class="spacer"></span>
             <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         </div>
 
@@ -96,12 +104,27 @@ sonar.projectKey=your-project-key</pre>
             </div>
 
             <div id="issue-filters" class="filter-bar">
-                <div class="sev-checkboxes">
-                    <label class="sev-check" title="Blocker"><input type="checkbox" class="sev-filter" value="BLOCKER"  checked><span class="sev sev-BLOCKER">B</span></label>
-                    <label class="sev-check" title="Critical"><input type="checkbox" class="sev-filter" value="CRITICAL" checked><span class="sev sev-CRITICAL">C</span></label>
-                    <label class="sev-check" title="Major"><input type="checkbox" class="sev-filter" value="MAJOR"    checked><span class="sev sev-MAJOR">Mj</span></label>
-                    <label class="sev-check" title="Minor"><input type="checkbox" class="sev-filter" value="MINOR"    checked><span class="sev sev-MINOR">Mi</span></label>
-                    <label class="sev-check" title="Info"><input type="checkbox" class="sev-filter" value="INFO"     checked><span class="sev sev-INFO">I</span></label>
+                <div class="filter-row">
+                    <div class="sev-dropdown-wrap">
+                        <button id="sev-dropdown-btn" class="btn btn-secondary btn-sm">Severity: All &#9660;</button>
+                        <div id="sev-dropdown-menu" class="dropdown-menu hidden">
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="BLOCKER"  checked><span class="sev sev-BLOCKER">BLOCKER</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="CRITICAL" checked><span class="sev sev-CRITICAL">CRITICAL</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="MAJOR"    checked><span class="sev sev-MAJOR">MAJOR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="MINOR"    checked><span class="sev sev-MINOR">MINOR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="sev-filter" value="INFO"     checked><span class="sev sev-INFO">INFO</span></label>
+                        </div>
+                    </div>
+                    <div class="sev-dropdown-wrap">
+                        <button id="stat-dropdown-btn" class="btn btn-secondary btn-sm">Status: All &#9660;</button>
+                        <div id="stat-dropdown-menu" class="dropdown-menu hidden">
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="OPEN"      checked><span class="stat stat-OPEN">OPEN</span></label>
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="CONFIRMED" checked><span class="stat stat-CONFIRMED">CONFIRMED</span></label>
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="REOPENED"  checked><span class="stat stat-REOPENED">REOPENED</span></label>
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="RESOLVED"  checked><span class="stat stat-RESOLVED">RESOLVED</span></label>
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="FIXED"     checked><span class="stat stat-FIXED">FIXED</span></label>
+                        </div>
+                    </div>
                 </div>
                 <input id="file-search" type="text" class="filter-input" placeholder="Filter by file…" />
             </div>
@@ -114,6 +137,12 @@ sonar.projectKey=your-project-key</pre>
                 <button id="btn-prev" class="btn btn-secondary btn-sm" disabled>&#8592; Prev</button>
                 <span id="page-info" class="page-info">1 / 1</span>
                 <button id="btn-next" class="btn btn-secondary btn-sm">Next &#8594;</button>
+                <select id="page-size-select" class="page-size-select" title="Rows per page">
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
             </div>
         </div>
 

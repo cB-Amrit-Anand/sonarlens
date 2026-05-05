@@ -4,6 +4,10 @@
   "description": "Fetch SonarQube issues and fix them using AI",
   "version": "0.1.0",
   "publisher": "sonarqube-ai-fixer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cB-Amrit-Anand/sonarqube-ai-fixer"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

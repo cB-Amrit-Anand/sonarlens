@@ -57,18 +57,23 @@ export abstract class SonarQubeBaseProvider {
             case 'saveConfig':     return this.handleSaveConfig(message.data as SaveConfigPayload);
             case 'testConnection': return this.handleTestConnection();
             case 'fetchPRs':       return this.handleFetchPRs();
-            case 'fetchIssues':    return this.handleFetchIssues(message.prKey, message.page ?? 1);
+            case 'fetchIssues':    return this.handleFetchIssues(message.prKey, message.page ?? 1, message.pageSize ?? 50);
             case 'fixIssue':       return this.handleFixIssue(message.issue as SonarIssue);
             case 'fixSelected':    return this.handleFixSelected(message.issues as SonarIssue[]);
             case 'fixAllLow':      return this.handleFixAllLow(message.prKey);
             case 'markResolved':   return this.handleMarkResolved(message.issueKey);
             case 'export':         return this.handleExport(message.format, message.content, message.filename);
             case 'openInPanel':    return this.handleOpenInPanel();
+            case 'openUrl':        return this.handleOpenUrl(message.url);
         }
     }
 
     protected handleOpenInPanel(): void {
         vscode.commands.executeCommand('sonarqube-ai-fixer.openPanel');
+    }
+
+    protected handleOpenUrl(url: string): void {
+        if (url) { vscode.env.openExternal(vscode.Uri.parse(url)); }
     }
 
     protected async handleSaveConfig(cfg: SaveConfigPayload): Promise<void> {
@@ -120,11 +125,11 @@ export abstract class SonarQubeBaseProvider {
         }
     }
 
-    protected async handleFetchIssues(prKey: string, page: number): Promise<void> {
+    protected async handleFetchIssues(prKey: string, page: number, pageSize = 50): Promise<void> {
         if (!this.sonarApi) { return this.toast('Save configuration first', 'error'); }
         this.post({ type: 'loading', key: 'issues', value: true });
         try {
-            const result = await this.sonarApi.getIssues(prKey, page);
+            const result = await this.sonarApi.getIssues(prKey, page, pageSize);
             this.post({ type: 'issuesLoaded', data: result });
         } catch (err: any) {
             this.toast(`Failed to fetch issues: ${err.message}`, 'error');

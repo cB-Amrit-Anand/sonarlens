@@ -6,11 +6,14 @@ const vscode = acquireVsCodeApi();
 /* ── State ───────────────────────────────────────────────────────────────── */
 const state = {
     currentPRKey:       /** @type {string|null} */ (null),
+    sonarUri:           /** @type {string} */ (''),
+    projectKey:         /** @type {string} */ (''),
     issuesMap:          /** @type {Record<string, any>} */ ({}),
     currentPageIssues:  /** @type {any[]} */ ([]),
     currentPage:        1,
     totalIssues:        0,
-    pageSize:           100,
+    pageSize:           50,
+    filteredIssues:     /** @type {any[]} */ ([]),
     fixingKeys:         /** @type {Set<string>} */ (new Set()),
     selectedKeys:       /** @type {Set<string>} */ (new Set()),
     prsList:            /** @type {any[]} */ ([]),
@@ -35,8 +38,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => showTab(/** @type {HTMLElement} */(btn).dataset.tab));
 });
 
-/* ── Settings button ─────────────────────────────────────────────────────── */
+/* ── Settings button + Back button ──────────────────────────────────────── */
 document.getElementById('btn-settings')?.addEventListener('click', () => showPage('settings'));
+document.getElementById('btn-back')?.addEventListener('click', () => showPage('main'));
 
 /* ── Open in Editor Tab buttons ──────────────────────────────────────────── */
 document.getElementById('btn-open-prs-editor')?.addEventListener('click', () => {
@@ -60,6 +64,8 @@ document.getElementById('btn-save-config')?.addEventListener('click', () => {
     if (!cfg.token) {
         return showToast('SonarQube Token is required', 'error');
     }
+    state.sonarUri   = cfg.uri;
+    state.projectKey = cfg.projectKey;
     vscode.postMessage({ type: 'saveConfig', data: cfg });
 });
 
@@ -93,9 +99,18 @@ document.getElementById('issues-container')?.addEventListener('click', e => {
     const resolveBtn= target.closest('[data-action="resolve"]');
     const checkbox  = target.closest('[data-action="select"]');
     const selectAll = target.closest('#select-all-issues');
+    const openBtn   = target.closest('[data-action="openIssue"]');
+    const moreBtn   = target.closest('[data-action="showMore"]');
 
     if (fixBtn)     { doFix(/** @type {HTMLElement} */(fixBtn).dataset.issueKey || ''); return; }
     if (resolveBtn) { doResolve(/** @type {HTMLElement} */(resolveBtn).dataset.issueKey || ''); return; }
+    if (openBtn)    { vscode.postMessage({ type: 'openUrl', url: /** @type {HTMLElement} */(openBtn).dataset.url }); return; }
+    if (moreBtn) {
+        const cell = moreBtn.closest('.msg-cell');
+        cell?.classList.toggle('msg-expanded');
+        /** @type {HTMLElement} */(moreBtn).textContent = cell?.classList.contains('msg-expanded') ? 'less' : 'more';
+        return;
+    }
     if (checkbox) {
         const key = /** @type {HTMLElement} */(checkbox).dataset.issueKey || '';
         /** @type {HTMLInputElement} */(checkbox).checked
@@ -106,7 +121,7 @@ document.getElementById('issues-container')?.addEventListener('click', e => {
     }
     if (selectAll) {
         const checked = /** @type {HTMLInputElement} */(selectAll).checked;
-        state.currentPageIssues.forEach(/** @param {any} i */ i => {
+        state.filteredIssues.forEach(/** @param {any} i */ i => {
             checked ? state.selectedKeys.add(i.key) : state.selectedKeys.delete(i.key);
         });
         applyFiltersAndRender();
@@ -144,25 +159,73 @@ document.getElementById('export-menu')?.addEventListener('click', e => {
     exportIssues(/** @type {HTMLElement} */(btn).dataset.export || '');
 });
 
-/* ── Filters ─────────────────────────────────────────────────────────────── */
-document.querySelectorAll('.sev-filter').forEach(cb => {
-    cb.addEventListener('change', () => applyFiltersAndRender());
+/* ── Severity dropdown ───────────────────────────────────────────────────── */
+document.getElementById('sev-dropdown-btn')?.addEventListener('click', () => {
+    document.getElementById('sev-dropdown-menu')?.classList.toggle('hidden');
 });
+document.addEventListener('click', e => {
+    const t = /** @type {HTMLElement} */(e.target);
+    if (!t.closest('.sev-dropdown-wrap')) {
+        document.getElementById('sev-dropdown-menu')?.classList.add('hidden');
+        document.getElementById('stat-dropdown-menu')?.classList.add('hidden');
+    }
+});
+
+/* ── Status dropdown ─────────────────────────────────────────────────────── */
+document.getElementById('stat-dropdown-btn')?.addEventListener('click', () => {
+    document.getElementById('stat-dropdown-menu')?.classList.toggle('hidden');
+    document.getElementById('sev-dropdown-menu')?.classList.add('hidden');
+});
+document.querySelectorAll('.stat-filter').forEach(cb => {
+    cb.addEventListener('change', () => { updateStatDropdownLabel(); applyFiltersAndRender(); });
+});
+
+function updateStatDropdownLabel() {
+    const checked = document.querySelectorAll('.stat-filter:checked');
+    const total   = document.querySelectorAll('.stat-filter').length;
+    const btn     = document.getElementById('stat-dropdown-btn');
+    if (btn) {
+        btn.textContent = checked.length === total
+            ? 'Status: All ▾'
+            : `Status: ${checked.length} selected ▾`;
+    }
+}
+document.querySelectorAll('.sev-filter').forEach(cb => {
+    cb.addEventListener('change', () => { updateSevDropdownLabel(); applyFiltersAndRender(); });
+});
+
+function updateSevDropdownLabel() {
+    const checked = document.querySelectorAll('.sev-filter:checked');
+    const total   = document.querySelectorAll('.sev-filter').length;
+    const btn     = document.getElementById('sev-dropdown-btn');
+    if (btn) {
+        btn.textContent = checked.length === total
+            ? 'Severity: All ▾'
+            : `Severity: ${checked.length} selected ▾`;
+    }
+}
+
+/* ── File filter ─────────────────────────────────────────────────────────── */
 document.getElementById('file-search')?.addEventListener('input', () => applyFiltersAndRender());
 
 /* ── Pagination ──────────────────────────────────────────────────────────── */
 document.getElementById('btn-prev')?.addEventListener('click', () => {
     if (state.currentPage > 1) {
         state.currentPage--;
-        vscode.postMessage({ type: 'fetchIssues', prKey: state.currentPRKey, page: state.currentPage });
+        vscode.postMessage({ type: 'fetchIssues', prKey: state.currentPRKey, page: state.currentPage, pageSize: state.pageSize });
     }
 });
 document.getElementById('btn-next')?.addEventListener('click', () => {
     const total = Math.ceil(state.totalIssues / state.pageSize);
     if (state.currentPage < total) {
         state.currentPage++;
-        vscode.postMessage({ type: 'fetchIssues', prKey: state.currentPRKey, page: state.currentPage });
+        vscode.postMessage({ type: 'fetchIssues', prKey: state.currentPRKey, page: state.currentPage, pageSize: state.pageSize });
     }
+});
+document.getElementById('page-size-select')?.addEventListener('change', e => {
+    state.pageSize = Number(/** @type {HTMLSelectElement} */(e.target).value);
+    state.currentPage = 1;
+    vscode.postMessage({ type: 'fetchIssues', prKey: state.currentPRKey, page: 1, pageSize: state.pageSize });
 });
 
 /* ── Extension → Webview messages ───────────────────────────────────────── */
@@ -188,8 +251,8 @@ window.addEventListener('message', e => {
 
 /* ── Config handlers ─────────────────────────────────────────────────────── */
 function onLoadConfig(cfg) {
-    if (cfg.uri)        setVal('sonar-uri', cfg.uri);
-    if (cfg.projectKey) setVal('project-key', cfg.projectKey);
+    if (cfg.uri)        { setVal('sonar-uri', cfg.uri);           state.sonarUri    = cfg.uri; }
+    if (cfg.projectKey) { setVal('project-key', cfg.projectKey);  state.projectKey  = cfg.projectKey; }
     if (cfg.token)      setVal('sonar-token', cfg.token);
     if (cfg.aiApiKey)   setVal('ai-api-key', cfg.aiApiKey);
     if (cfg.fromFile)   document.getElementById('missing-props-warning')?.classList.add('hidden');
@@ -201,6 +264,8 @@ function onNoPropertiesFile() {
 
 function onConfigStatus(configured) {
     showPage(configured ? 'main' : 'settings');
+    // Hide Back button when opening settings for the first time (nothing to go back to)
+    document.getElementById('btn-back')?.classList.toggle('hidden', !configured);
 }
 
 function onConfigSaved() {
@@ -320,12 +385,12 @@ function selectPR(prKey, prTitle) {
 
     const badge = document.getElementById('pr-badge');
     if (badge) {
-        badge.textContent = `PR #${prKey}`;
+        badge.textContent = `PR #${prKey}${prTitle ? ` — ${prTitle}` : ''}`;
         badge.classList.remove('hidden');
     }
 
     showTab('issues');
-    vscode.postMessage({ type: 'fetchIssues', prKey, page: 1 });
+    vscode.postMessage({ type: 'fetchIssues', prKey, page: 1, pageSize: state.pageSize });
 }
 
 /* ── Issues rendering ────────────────────────────────────────────────────── */
@@ -351,16 +416,22 @@ function applyFiltersAndRender() {
         [...document.querySelectorAll('.sev-filter:checked')]
             .map(el => /** @type {HTMLInputElement} */(el).value)
     );
+    const activeStats = new Set(
+        [...document.querySelectorAll('.stat-filter:checked')]
+            .map(el => /** @type {HTMLInputElement} */(el).value)
+    );
     const fileQ = (/** @type {HTMLInputElement} */(document.getElementById('file-search'))?.value || '').toLowerCase().trim();
 
     const filtered = state.currentPageIssues.filter(issue => {
         if (!activeSevs.has(issue.severity)) { return false; }
+        if (!activeStats.has(issue.status))  { return false; }
         if (fileQ) {
             const file = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
             if (!file.toLowerCase().includes(fileQ)) { return false; }
         }
         return true;
     });
+    state.filteredIssues = filtered;
     renderIssueRows(filtered);
 }
 
@@ -377,17 +448,24 @@ function renderIssueRows(issues) {
 
     const allSelected = issues.every(/** @param {any} i */ i => state.selectedKeys.has(i.key));
 
-    const rows = issues.map(/** @param {any} issue */ issue => {
+    const pageOffset = (state.currentPage - 1) * state.pageSize;
+    const rows = issues.map(/** @param {any} issue */ (issue, idx) => {
+        const sr = pageOffset + idx + 1;
         const filePath = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
         const line     = issue.textRange?.startLine ?? issue.line ?? '—';
         const fixing   = state.fixingKeys.has(issue.key);
         const selected = state.selectedKeys.has(issue.key);
+        const issueUrl = state.sonarUri && state.projectKey
+            ? `${state.sonarUri}/project/issues?id=${encodeURIComponent(state.projectKey)}&issues=${encodeURIComponent(issue.key)}&open=${encodeURIComponent(issue.key)}${state.currentPRKey ? `&pullRequest=${encodeURIComponent(state.currentPRKey)}` : ''}`
+            : '';
         return `<tr id="irow-${esc(issue.key)}" class="${fixing ? 'row-fixing' : ''}${selected ? ' row-selected' : ''}">
             <td><input type="checkbox" class="row-check" data-action="select" data-issue-key="${esc(issue.key)}" ${selected ? 'checked' : ''}></td>
-            <td><span class="sev sev-${issue.severity}" title="${issue.severity}">${issue.severity.charAt(0)}</span></td>
-            <td>
-                <span class="cell-msg" title="${esc(issue.message)}">${esc(issue.message)}</span>
-                <span class="cell-file" title="${esc(filePath)}">${esc(filePath)}:${line}</span>
+            <td class="cell-sr">${sr}</td>
+            <td><span class="sev sev-${issue.severity}">${issue.severity}</span></td>
+            <td class="msg-cell">
+                <span class="cell-msg">${issueUrl ? `<a class="issue-link" data-action="openIssue" data-url="${esc(issueUrl)}" href="#" title="Open in SonarQube">${esc(issue.message)}</a>` : esc(issue.message)}</span>
+                <button class="more-btn" data-action="showMore">more</button>
+                <span class="cell-file">${esc(filePath)}:${line}</span>
             </td>
             <td><span class="stat stat-${issue.status}" id="stat-${esc(issue.key)}">${issue.status}</span></td>
             <td>
@@ -416,7 +494,7 @@ function renderIssueRows(issues) {
                     <thead>
                         <tr>
                             <th><input type="checkbox" id="select-all-issues" ${allSelected ? 'checked' : ''}></th>
-                            <th>Sev</th><th>Message / File</th><th>Status</th><th>Actions</th>
+                            <th class="cell-sr">#</th><th>Sev</th><th>Message / File</th><th>Status</th><th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
@@ -431,7 +509,7 @@ function renderIssueRows(issues) {
     if (pageInfo) { pageInfo.textContent = `${state.currentPage} / ${totalPages}`; }
     if (btnPrev)  { /** @type {HTMLButtonElement} */(btnPrev).disabled = state.currentPage <= 1; }
     if (btnNext)  { /** @type {HTMLButtonElement} */(btnNext).disabled = state.currentPage >= totalPages; }
-    pagination?.classList.toggle('hidden', state.totalIssues <= state.pageSize);
+    pagination?.classList.toggle('hidden', Math.ceil(state.totalIssues / state.pageSize) <= 1);
 }
 
 /* ── Export ──────────────────────────────────────────────────────────────── */

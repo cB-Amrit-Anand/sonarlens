@@ -96,13 +96,13 @@ export class SonarQubeApi {
         return response.data.pullRequests || [];
     }
 
-    async getIssues(prKey: string, page: number = 1): Promise<IssuesResponse> {
+    async getIssues(prKey: string, page: number = 1, ps: number = 50): Promise<IssuesResponse> {
         const response = await this.client.get('/api/issues/search', {
             params: {
                 componentKeys: this.config.projectKey,
                 pullRequest: prKey,
                 p: page,
-                ps: 100
+                ps
             }
         });
         // SonarQube ≤9 puts pagination at top level; v10+ / SonarCloud wraps it in `paging`
