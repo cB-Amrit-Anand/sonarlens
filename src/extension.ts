@@ -1,14 +1,22 @@
 import * as vscode from 'vscode';
+import { SonarQubeSidebarProvider } from './ui/sidebarProvider';
 import { SonarQubeWebviewProvider } from './ui/webviewProvider';
 
 export function activate(context: vscode.ExtensionContext) {
-    const provider = new SonarQubeWebviewProvider(context);
+    const panelProvider   = new SonarQubeWebviewProvider(context);
+    const sidebarProvider = new SonarQubeSidebarProvider(context);
 
-    const disposable = vscode.commands.registerCommand('sonarqube-ai-fixer.open', () => {
-        provider.openPanel();
-    });
-
-    context.subscriptions.push(disposable);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            SonarQubeSidebarProvider.viewId,
+            sidebarProvider,
+            { webviewOptions: { retainContextWhenHidden: true } }
+        ),
+        vscode.commands.registerCommand('sonarqube-ai-fixer.openPanel', () => {
+            panelProvider.openPanel();
+        })
+    );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-function
 export function deactivate() {}

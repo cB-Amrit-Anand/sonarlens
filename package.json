@@ -1,7 +1,7 @@
 {
   "name": "sonarqube-ai-fixer",
   "displayName": "SonarQube AI Fixer",
-  "description": "Fetch SonarQube issues and fix them using AI (Claude)",
+  "description": "Fetch SonarQube issues and fix them using AI",
   "version": "0.1.0",
   "publisher": "sonarqube-ai-fixer",
   "engines": {
@@ -13,12 +13,40 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sonarqube-ai-fixer-container",
+          "title": "SonarQube AI Fixer",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sonarqube-ai-fixer-container": [
+        {
+          "type": "webview",
+          "id": "sonarqube-ai-fixer.sidebar",
+          "name": "SonarQube AI Fixer"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "sonarqube-ai-fixer.open",
-        "title": "SonarQube AI Fixer: Open Panel"
+        "command": "sonarqube-ai-fixer.openPanel",
+        "title": "Open in Editor Tab",
+        "icon": "$(link-external)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "sonarqube-ai-fixer.openPanel",
+          "when": "view == sonarqube-ai-fixer.sidebar",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
