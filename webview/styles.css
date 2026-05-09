@@ -145,21 +145,45 @@ input[readonly] { opacity: .55; cursor: default; }
     font-size: 11px;
     line-height: 1.6;
     color: var(--text-muted);
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
+#auth-panel-sso              { text-align: center; padding: 4px 0 8px; }
+#auth-panel-sso .sso-info-box,
+#auth-panel-sso .sso-fallback { text-align: left; }
+#btn-sso-login               { padding: 8px 24px; font-size: 12px; margin-bottom: 4px; }
 .sso-waiting {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
     margin-top: 10px;
     font-size: 11px;
     color: var(--text-muted);
 }
-.sso-success {
-    margin-top: 10px;
-    font-size: 11px;
-    color: var(--success);
+.sso-logged-in {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: rgba(78,201,78,.1);
+    border: 1px solid rgba(78,201,78,.35);
+    border-radius: var(--radius);
+    text-align: left;
 }
+.sso-logged-in-icon {
+    font-size: 20px;
+    color: var(--success);
+    flex-shrink: 0;
+    line-height: 1;
+}
+.sso-logged-in-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+}
+.sso-logged-in-text strong { color: var(--success); font-size: 12px; }
+.sso-logged-in-text span   { color: var(--text-muted); }
 .sso-fallback {
     margin-top: 10px;
     padding: 8px 10px;
