@@ -168,6 +168,18 @@ input[readonly] { opacity: .55; cursor: default; }
     border-radius: var(--radius-sm);
     font-size: 11px;
 }
+.sso-fallback input {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: 6px 8px;
+    font-size: 12px;
+    outline: none;
+    transition: border-color .12s;
+}
+.sso-fallback input:focus { border-color: var(--accent); }
 
 /* ── Tab bar ─────────────────────────────────────────────────────────────── */
 .tab-bar {
