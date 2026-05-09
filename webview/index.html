@@ -39,20 +39,47 @@ sonar.projectKey=your-project-key</pre>
             <span class="hint">Unique identifier for your project in SonarQube. Found on your project's main page. Auto-filled from <code>sonar-project.properties</code> if present.</span>
         </div>
         <div class="form-group">
-            <label for="token-type">Token Type</label>
-            <select id="token-type" class="filter-input" style="height:28px;width:100%;">
-                <option value="basic">User Token (Basic Auth)</option>
-                <option value="bearer">Bearer Token (SSO / PAT)</option>
-            </select>
-            <span class="hint">Use <em>Bearer Token</em> for SSO tokens or Personal Access Tokens that require Bearer authentication.</span>
-        </div>
-        <div class="form-group">
-            <label for="sonar-token">SonarQube Token <span class="required">*</span></label>
-            <div class="input-with-eye">
-                <input id="sonar-token" type="password" placeholder="squ_xxxxxxxxxxxx" />
-                <button class="eye-btn icon-btn" data-target="sonar-token" title="Show/hide token">&#128065;</button>
+            <label>SonarQube Authentication <span class="required">*</span></label>
+            <div class="auth-method-tabs">
+                <button class="auth-tab active" data-auth="manual" id="auth-tab-manual">Paste Token</button>
+                <button class="auth-tab" data-auth="sso" id="auth-tab-sso">Login with SSO</button>
             </div>
-            <span class="hint">User token from SonarQube → My Account → Security → Generate Token. Needs at least <em>Browse</em> permission on the project.</span>
+        </div>
+
+        <!-- Manual token panel -->
+        <div id="auth-panel-manual">
+            <div class="form-group">
+                <label for="token-type">Token Type</label>
+                <select id="token-type" class="filter-input" style="height:28px;width:100%;">
+                    <option value="basic">User Token (Basic Auth)</option>
+                    <option value="bearer">Bearer Token (PAT / custom)</option>
+                </select>
+                <span class="hint">Use <em>Bearer Token</em> for Personal Access Tokens that require Bearer auth. Standard SonarQube tokens use Basic Auth.</span>
+            </div>
+            <div class="form-group">
+                <label for="sonar-token">SonarQube Token</label>
+                <div class="input-with-eye">
+                    <input id="sonar-token" type="password" placeholder="squ_xxxxxxxxxxxx" />
+                    <button class="eye-btn icon-btn" data-target="sonar-token" title="Show/hide token">&#128065;</button>
+                </div>
+                <span class="hint">Generate at SonarQube → My Account → Security → Generate Token. Needs at least <em>Browse</em> permission.</span>
+            </div>
+        </div>
+
+        <!-- SSO panel -->
+        <div id="auth-panel-sso" class="hidden">
+            <div class="sso-info-box">
+                Opens your browser → log in with your SSO credentials → token auto-generated and saved back to the extension.
+            </div>
+            <button id="btn-sso-login" class="btn btn-primary">
+                <span class="btn-text">Open browser &amp; Login</span>
+                <span class="spinner hidden" style="border-top-color:#fff"></span>
+            </button>
+            <div id="sso-waiting" class="sso-waiting hidden">
+                <span class="spinner" style="border-top-color:var(--accent);width:13px;height:13px"></span>
+                <span>Waiting for browser login…</span>
+            </div>
+            <div id="sso-success" class="sso-success hidden">&#10003; Token received and saved — click Save to continue.</div>
         </div>
         <div class="form-group">
             <label for="ai-api-key">OpenAI API Key</label>

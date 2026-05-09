@@ -53,6 +53,27 @@ document.getElementById('btn-open-issues-editor')?.addEventListener('click', () 
     vscode.postMessage({ type: 'openInPanel' });
 });
 
+/* ── Auth method tabs (Paste Token / SSO) ───────────────────────────────── */
+document.querySelectorAll('.auth-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const mode = /** @type {HTMLElement} */(btn).dataset.auth;
+        document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('auth-panel-manual')?.classList.toggle('hidden', mode !== 'manual');
+        document.getElementById('auth-panel-sso')?.classList.toggle('hidden', mode !== 'sso');
+    });
+});
+
+/* ── SSO Login button ────────────────────────────────────────────────────── */
+document.getElementById('btn-sso-login')?.addEventListener('click', () => {
+    const sonarUri = val('sonar-uri');
+    if (!sonarUri) {
+        showToast('Enter the SonarQube URI above first', 'error');
+        return;
+    }
+    vscode.postMessage({ type: 'ssoLogin', sonarUri });
+});
+
 /* ── Eye toggle buttons ──────────────────────────────────────────────────── */
 document.querySelectorAll('.eye-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -74,10 +95,14 @@ document.getElementById('btn-save-config')?.addEventListener('click', () => {
         tokenType:  /** @type {HTMLSelectElement} */(document.getElementById('token-type'))?.value || 'basic'
     };
     if (!cfg.uri || !cfg.projectKey) {
-        return showToast('sonar-project.properties not found or missing required keys', 'error');
+        return showToast('SonarQube URI and Project Key are required', 'error');
     }
-    if (!cfg.token) {
+    const ssoMode = document.getElementById('auth-tab-sso')?.classList.contains('active');
+    if (!cfg.token && !ssoMode) {
         return showToast('SonarQube Token is required', 'error');
+    }
+    if (!cfg.token && ssoMode) {
+        return showToast('Complete SSO login first — click "Open browser & Login"', 'error');
     }
     state.sonarUri   = cfg.uri;
     state.projectKey = cfg.projectKey;
@@ -288,6 +313,10 @@ window.addEventListener('message', e => {
         case 'resolveStarted':  return onResolveStarted(msg.issueKey);
         case 'resolveError':    return onResolveError(msg.issueKey);
         case 'issueResolved':   return onIssueResolved(msg.issueKey);
+        case 'ssoWaiting':      return onSsoWaiting();
+        case 'ssoSuccess':      return onSsoSuccess(msg.token);
+        case 'ssoError':        return onSsoError();
+        case 'ssoTimeout':      return onSsoError();
         case 'toast':           return showToast(msg.message, msg.variant || 'info');
         case 'error':           return showToast(msg.message, 'error');
     }
@@ -678,6 +707,43 @@ function doDismiss(issueKey) {
     }
     applyFiltersAndRender();
     updateSelectionUI();
+}
+
+function onSsoWaiting() {
+    const btn = document.getElementById('btn-sso-login');
+    if (btn) {
+        /** @type {HTMLButtonElement} */(btn).disabled = true;
+        const t = btn.querySelector('.btn-text');
+        if (t) { t.textContent = 'Waiting…'; }
+        btn.querySelector('.spinner')?.classList.remove('hidden');
+    }
+    document.getElementById('sso-waiting')?.classList.remove('hidden');
+    document.getElementById('sso-success')?.classList.add('hidden');
+}
+
+/** @param {string} token */
+function onSsoSuccess(token) {
+    const btn = document.getElementById('btn-sso-login');
+    if (btn) {
+        /** @type {HTMLButtonElement} */(btn).disabled = false;
+        const t = btn.querySelector('.btn-text');
+        if (t) { t.textContent = 'Open browser & Login'; }
+        btn.querySelector('.spinner')?.classList.add('hidden');
+    }
+    document.getElementById('sso-waiting')?.classList.add('hidden');
+    document.getElementById('sso-success')?.classList.remove('hidden');
+    if (token) { setVal('sonar-token', token); }
+}
+
+function onSsoError() {
+    const btn = document.getElementById('btn-sso-login');
+    if (btn) {
+        /** @type {HTMLButtonElement} */(btn).disabled = false;
+        const t = btn.querySelector('.btn-text');
+        if (t) { t.textContent = 'Open browser & Login'; }
+        btn.querySelector('.spinner')?.classList.add('hidden');
+    }
+    document.getElementById('sso-waiting')?.classList.add('hidden');
 }
 
 function onResolveStarted(issueKey) {

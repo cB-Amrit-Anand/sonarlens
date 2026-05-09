@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as http from 'http';
+import * as net from 'net';
 import { SonarQubeApi, SonarConfig, SonarIssue } from '../api/sonarqubeApi';
 import { AiFixProvider } from '../ai/aiFixProvider';
 import {
@@ -65,6 +67,7 @@ export abstract class SonarQubeBaseProvider {
             case 'fixSelected':    return this.handleFixSelected(message.issues as SonarIssue[]);
             case 'fixAllLow':      return this.handleFixAllLow(message.prKey);
             case 'markResolved':   return this.handleMarkResolved(message.issueKey);
+            case 'ssoLogin':       return this.handleSsoLogin(message.sonarUri);
             case 'export':         return this.handleExport(message.format, message.content, message.filename);
             case 'openInPanel':    return this.handleOpenInPanel();
             case 'openUrl':        return this.handleOpenUrl(message.url);
@@ -234,6 +237,75 @@ export abstract class SonarQubeBaseProvider {
         } catch (err: any) {
             this.toast(`Fix All failed: ${err.message}`, 'error');
         }
+    }
+
+    protected async handleSsoLogin(sonarUri: string): Promise<void> {
+        if (!sonarUri) {
+            return this.toast('Enter the SonarQube URI first, then click Login with SSO', 'error');
+        }
+        const uri = sonarUri.replace(/\/$/, '');
+
+        let port: number;
+        try {
+            port = await new Promise<number>((resolve, reject) => {
+                const srv = net.createServer();
+                srv.listen(0, '127.0.0.1', () => {
+                    const addr = srv.address() as net.AddressInfo;
+                    srv.close(() => resolve(addr.port));
+                });
+                srv.on('error', reject);
+            });
+        } catch (err: any) {
+            return this.toast(`SSO: could not open a local callback port — ${err.message}`, 'error');
+        }
+
+        this.post({ type: 'ssoWaiting' });
+
+        const server = http.createServer((req, res) => {
+            const parsed = new URL(req.url || '/', `http://127.0.0.1:${port}`);
+            const token  = parsed.searchParams.get('token');
+
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(token
+                ? `<!DOCTYPE html><html><head><style>body{display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif;background:#1e1e1e;color:#ccc;font-size:15px}</style></head><body><p>&#10003;&nbsp;Token received — you can close this tab and return to VS Code.</p><script>setTimeout(()=>window.close(),1500)</script></body></html>`
+                : `<!DOCTYPE html><html><body><p>No token in callback — please try again.</p></body></html>`
+            );
+
+            server.close();
+
+            if (token) {
+                void this.onSsoTokenReceived(token);
+            } else {
+                this.post({ type: 'ssoError' });
+                this.toast('SSO completed but no token was returned — try generating a token manually', 'warning');
+            }
+        });
+
+        server.on('error', (err: Error) => {
+            this.post({ type: 'ssoError' });
+            this.toast(`SSO callback server error: ${err.message}`, 'error');
+        });
+
+        const timeout = setTimeout(() => {
+            server.close();
+            this.post({ type: 'ssoTimeout' });
+            this.toast('SSO login timed out — please try again', 'warning');
+        }, 5 * 60 * 1000);
+
+        server.on('close', () => clearTimeout(timeout));
+
+        server.listen(port, '127.0.0.1', () => {
+            const authUrl = `${uri}/sonarlint/auth?ideName=SonarLens&idePort=${port}`;
+            void vscode.env.openExternal(vscode.Uri.parse(authUrl));
+            this.toast('Browser opened — complete SSO login to auto-import your token', 'info');
+        });
+    }
+
+    protected async onSsoTokenReceived(token: string): Promise<void> {
+        await this.context.secrets.store('sonarToken', token);
+        await this.context.globalState.update('sonarTokenType', 'basic');
+        this.post({ type: 'ssoSuccess', token });
+        this.toast('SSO login successful — token saved!', 'success');
     }
 
     protected async handleMarkResolved(issueKey: string): Promise<void> {

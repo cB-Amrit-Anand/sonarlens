@@ -115,6 +115,52 @@ input[readonly] { opacity: .55; cursor: default; }
     white-space: pre-wrap;
 }
 
+/* ── Auth method tabs (settings) ─────────────────────────────────────────── */
+.auth-method-tabs {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.auth-tab {
+    flex: 1;
+    background: var(--bg2);
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+}
+.auth-tab:not(:last-child) { border-right: 1px solid var(--border); }
+.auth-tab:hover { color: var(--text); background: var(--bg-hover); }
+.auth-tab.active { background: var(--accent); color: #fff; }
+
+.sso-info-box {
+    background: rgba(14,144,217,.08);
+    border: 1px solid rgba(14,144,217,.3);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.sso-waiting {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.sso-success {
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--success);
+}
+
 /* ── Tab bar ─────────────────────────────────────────────────────────────── */
 .tab-bar {
     display: flex;
