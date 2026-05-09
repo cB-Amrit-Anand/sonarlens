@@ -79,7 +79,15 @@ sonar.projectKey=your-project-key</pre>
                 <span class="spinner" style="border-top-color:var(--accent);width:13px;height:13px"></span>
                 <span>Waiting for browser login…</span>
             </div>
-            <div id="sso-success" class="sso-success hidden">&#10003; Token received and saved — click Save to continue.</div>
+            <div id="sso-fallback" class="sso-fallback hidden">
+                <span class="hint">SonarQube showed the token instead of redirecting? Copy it from the browser and paste below:</span>
+                <div class="input-with-eye" style="margin-top:6px">
+                    <input id="sso-token-paste" type="password" placeholder="squ_…" />
+                    <button class="eye-btn icon-btn" data-target="sso-token-paste" title="Show/hide">&#128065;</button>
+                </div>
+                <button id="btn-sso-use-token" class="btn btn-primary btn-sm" style="margin-top:6px">Use this token</button>
+            </div>
+            <div id="sso-success" class="sso-success hidden">&#10003; Token saved — click Save to continue.</div>
         </div>
         <div class="form-group">
             <label for="ai-api-key">OpenAI API Key</label>

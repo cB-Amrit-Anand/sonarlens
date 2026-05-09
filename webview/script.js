@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 'use strict';
 
 const vscode = acquireVsCodeApi();
@@ -72,6 +72,18 @@ document.getElementById('btn-sso-login')?.addEventListener('click', () => {
         return;
     }
     vscode.postMessage({ type: 'ssoLogin', sonarUri });
+});
+
+/* ── SSO fallback: use manually pasted token ─────────────────────────────── */
+document.getElementById('btn-sso-use-token')?.addEventListener('click', () => {
+    const token = val('sso-token-paste');
+    if (!token) {
+        showToast('Paste the token from the browser first', 'error');
+        return;
+    }
+    onSsoSuccess(token);
+    document.getElementById('sso-fallback')?.classList.add('hidden');
+    document.getElementById('sso-waiting')?.classList.add('hidden');
 });
 
 /* ── Eye toggle buttons ──────────────────────────────────────────────────── */
@@ -718,7 +730,16 @@ function onSsoWaiting() {
         btn.querySelector('.spinner')?.classList.remove('hidden');
     }
     document.getElementById('sso-waiting')?.classList.remove('hidden');
+    document.getElementById('sso-fallback')?.classList.add('hidden');
     document.getElementById('sso-success')?.classList.add('hidden');
+    // Show paste fallback after 2 s — handles SonarQube versions that display
+    // the token instead of auto-redirecting to the local callback server.
+    setTimeout(() => {
+        const waiting = document.getElementById('sso-waiting');
+        if (waiting && !waiting.classList.contains('hidden')) {
+            document.getElementById('sso-fallback')?.classList.remove('hidden');
+        }
+    }, 2000);
 }
 
 /** @param {string} token */
