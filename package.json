@@ -1,19 +1,39 @@
 {
   "name": "sonarlens",
   "displayName": "SonarLens",
-  "description": "Fetch SonarQube issues and fix them using AI",
-  "version": "0.1.0",
+  "description": "View SonarQube issues inside your editor and fix them with AI — supports SSO, local dismiss, and bulk AI fixes.",
+  "version": "1.0.0",
   "publisher": "sonarlens",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/cB-Amrit-Anand/sonarlens"
   },
+  "bugs": {
+    "url": "https://github.com/cB-Amrit-Anand/sonarlens/issues"
+  },
+  "homepage": "https://github.com/cB-Amrit-Anand/sonarlens#readme",
+  "keywords": [
+    "sonarqube",
+    "sonarcloud",
+    "code quality",
+    "static analysis",
+    "ai fix",
+    "openai",
+    "linter",
+    "issues"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Linters",
     "Other"
   ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {

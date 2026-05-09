@@ -10,3 +10,10 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 node_modules/**
+memory.md
+requirement.txt
+DEVELOPMENT.md
+FEATURES.md
+sonarqube-apis.json
+PUBLISHING.md
+*.vsix
