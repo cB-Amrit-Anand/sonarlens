@@ -9,7 +9,7 @@ import {
 } from '../utils/fileUtils';
 import { commitFix, isGitRepo } from '../utils/gitUtils';
 
-interface SaveConfigPayload extends SonarConfig { aiApiKey: string; }
+interface SaveConfigPayload extends SonarConfig { aiApiKey: string; tokenType: 'basic' | 'bearer'; }
 
 export abstract class SonarQubeBaseProvider {
     protected sonarApi?: SonarQubeApi;
@@ -30,12 +30,14 @@ export abstract class SonarQubeBaseProvider {
         const propsConfig = workspaceRoot ? readSonarProperties(workspaceRoot) : null;
         const validProps = !!(propsConfig?.uri && propsConfig?.projectKey);
 
+        const storedTokenType = this.context.globalState.get<'basic' | 'bearer'>('sonarTokenType') || 'basic';
+
         if (validProps) {
-            this.post({ type: 'loadConfig', data: { ...propsConfig, token: storedToken, aiApiKey: storedAiKey, fromFile: true } });
+            this.post({ type: 'loadConfig', data: { ...propsConfig, token: storedToken, aiApiKey: storedAiKey, tokenType: storedTokenType, fromFile: true } });
         } else {
             const savedConfig = this.context.globalState.get<Omit<SonarConfig, 'token'>>('sonarConfigMeta');
             if (savedConfig) {
-                this.post({ type: 'loadConfig', data: { ...savedConfig, token: storedToken, aiApiKey: storedAiKey } });
+                this.post({ type: 'loadConfig', data: { ...savedConfig, token: storedToken, aiApiKey: storedAiKey, tokenType: storedTokenType } });
             }
             this.post({ type: 'noPropertiesFile' });
         }
@@ -44,7 +46,8 @@ export abstract class SonarQubeBaseProvider {
             this.sonarApi = new SonarQubeApi({
                 uri: propsConfig!.uri!.replace(/\/$/, ''),
                 projectKey: propsConfig!.projectKey!,
-                token: storedToken
+                token: storedToken,
+                tokenType: storedTokenType
             });
             this.aiProvider = storedAiKey ? new AiFixProvider(storedAiKey) : undefined;
         }
@@ -80,7 +83,8 @@ export abstract class SonarQubeBaseProvider {
         const sonarConfig: SonarConfig = {
             uri: cfg.uri.replace(/\/$/, ''),
             projectKey: cfg.projectKey,
-            token: cfg.token
+            token: cfg.token,
+            tokenType: cfg.tokenType || 'basic'
         };
 
         this.sonarApi = new SonarQubeApi(sonarConfig);
@@ -94,6 +98,7 @@ export abstract class SonarQubeBaseProvider {
             uri: sonarConfig.uri,
             projectKey: sonarConfig.projectKey
         });
+        await this.context.globalState.update('sonarTokenType', sonarConfig.tokenType);
 
         this.post({ type: 'configSaved' });
         this.toast('Configuration saved!', 'success');
@@ -233,11 +238,13 @@ export abstract class SonarQubeBaseProvider {
 
     protected async handleMarkResolved(issueKey: string): Promise<void> {
         if (!this.sonarApi) { return this.toast('SonarQube not configured', 'error'); }
+        this.post({ type: 'resolveStarted', issueKey });
         try {
             await this.sonarApi.markIssueResolved(issueKey);
             this.post({ type: 'issueResolved', issueKey });
             this.toast('Marked as resolved in SonarQube', 'success');
         } catch (err: any) {
+            this.post({ type: 'resolveError', issueKey });
             const is403 = (err as any).response?.status === 403 || err.message?.includes('403');
             this.toast(
                 is403

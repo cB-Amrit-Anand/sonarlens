@@ -16,7 +16,9 @@ const state = {
     filteredIssues:     /** @type {any[]} */ ([]),
     hasAiKey:           false,
     fixingKeys:         /** @type {Set<string>} */ (new Set()),
+    resolvingKeys:      /** @type {Set<string>} */ (new Set()),
     selectedKeys:       /** @type {Set<string>} */ (new Set()),
+    locallyDismissed:   /** @type {Set<string>} */ (new Set()),
     prsList:            /** @type {any[]} */ ([]),
     prSort:             { col: 'date', dir: 'desc' }
 };
@@ -51,13 +53,25 @@ document.getElementById('btn-open-issues-editor')?.addEventListener('click', () 
     vscode.postMessage({ type: 'openInPanel' });
 });
 
+/* ── Eye toggle buttons ──────────────────────────────────────────────────── */
+document.querySelectorAll('.eye-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const targetId = /** @type {HTMLElement} */(btn).dataset.target;
+        const input = /** @type {HTMLInputElement} */(document.getElementById(targetId || ''));
+        if (!input) { return; }
+        input.type = input.type === 'password' ? 'text' : 'password';
+        btn.innerHTML = input.type === 'password' ? '&#128065;' : '&#128584;';
+    });
+});
+
 /* ── Config form ─────────────────────────────────────────────────────────── */
 document.getElementById('btn-save-config')?.addEventListener('click', () => {
     const cfg = {
         uri:        val('sonar-uri'),
         projectKey: val('project-key'),
         token:      val('sonar-token'),
-        aiApiKey:   val('ai-api-key')
+        aiApiKey:   val('ai-api-key'),
+        tokenType:  /** @type {HTMLSelectElement} */(document.getElementById('token-type'))?.value || 'basic'
     };
     if (!cfg.uri || !cfg.projectKey) {
         return showToast('sonar-project.properties not found or missing required keys', 'error');
@@ -119,16 +133,18 @@ document.getElementById('prs-container')?.addEventListener('click', e => {
 
 /* ── Issues table delegation ─────────────────────────────────────────────── */
 document.getElementById('issues-container')?.addEventListener('click', e => {
-    const target    = /** @type {HTMLElement} */(e.target);
-    const fixBtn    = target.closest('[data-action="fix"]');
-    const resolveBtn= target.closest('[data-action="resolve"]');
-    const checkbox  = target.closest('[data-action="select"]');
-    const selectAll = target.closest('#select-all-issues');
-    const openBtn   = target.closest('[data-action="openIssue"]');
-    const moreBtn   = target.closest('[data-action="showMore"]');
+    const target     = /** @type {HTMLElement} */(e.target);
+    const fixBtn     = target.closest('[data-action="fix"]');
+    const resolveBtn = target.closest('[data-action="resolve"]');
+    const dismissBtn = target.closest('[data-action="dismiss"]');
+    const checkbox   = target.closest('[data-action="select"]');
+    const selectAll  = target.closest('#select-all-issues');
+    const openBtn    = target.closest('[data-action="openIssue"]');
+    const moreBtn    = target.closest('[data-action="showMore"]');
 
     if (fixBtn)     { doFix(/** @type {HTMLElement} */(fixBtn).dataset.issueKey || ''); return; }
     if (resolveBtn) { doResolve(/** @type {HTMLElement} */(resolveBtn).dataset.issueKey || ''); return; }
+    if (dismissBtn) { doDismiss(/** @type {HTMLElement} */(dismissBtn).dataset.issueKey || ''); return; }
     if (openBtn)    { vscode.postMessage({ type: 'openUrl', url: /** @type {HTMLElement} */(openBtn).dataset.url }); return; }
     if (moreBtn) {
         const cell = moreBtn.closest('.msg-cell');
@@ -269,6 +285,8 @@ window.addEventListener('message', e => {
         case 'fixApplied':      return onFixApplied(msg.issueKey);
         case 'fixRejected':     return setFixing(msg.issueKey, false);
         case 'fixError':        return onFixError(msg.issueKey, msg.message);
+        case 'resolveStarted':  return onResolveStarted(msg.issueKey);
+        case 'resolveError':    return onResolveError(msg.issueKey);
         case 'issueResolved':   return onIssueResolved(msg.issueKey);
         case 'toast':           return showToast(msg.message, msg.variant || 'info');
         case 'error':           return showToast(msg.message, 'error');
@@ -281,6 +299,10 @@ function onLoadConfig(cfg) {
     if (cfg.projectKey) { setVal('project-key', cfg.projectKey);  state.projectKey  = cfg.projectKey; }
     if (cfg.token)      setVal('sonar-token', cfg.token);
     if (cfg.aiApiKey)   { setVal('ai-api-key', cfg.aiApiKey); state.hasAiKey = true; }
+    if (cfg.tokenType) {
+        const sel = /** @type {HTMLSelectElement} */(document.getElementById('token-type'));
+        if (sel) { sel.value = cfg.tokenType; }
+    }
     if (cfg.fromFile)   document.getElementById('missing-props-warning')?.classList.add('hidden');
 }
 
@@ -480,7 +502,10 @@ function applyFiltersAndRender() {
     );
     const fileQ = (/** @type {HTMLInputElement} */(document.getElementById('file-search'))?.value || '').toLowerCase().trim();
 
+    const showDismissed = activeStats.has('DISMISSED');
     const filtered = state.currentPageIssues.filter(issue => {
+        const isDismissed = state.locallyDismissed.has(issue.key);
+        if (isDismissed) { return showDismissed; }
         if (!activeSevs.has(issue.severity)) { return false; }
         if (!activeStats.has(issue.status))  { return false; }
         if (fileQ) {
@@ -508,15 +533,30 @@ function renderIssueRows(issues) {
 
     const pageOffset = (state.currentPage - 1) * state.pageSize;
     const rows = issues.map(/** @param {any} issue */ (issue, idx) => {
-        const sr = pageOffset + idx + 1;
-        const filePath = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
-        const line     = issue.textRange?.startLine ?? issue.line ?? '—';
-        const fixing   = state.fixingKeys.has(issue.key);
-        const selected = state.selectedKeys.has(issue.key);
-        const issueUrl = state.sonarUri && state.projectKey
+        const sr         = pageOffset + idx + 1;
+        const filePath   = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
+        const line       = issue.textRange?.startLine ?? issue.line ?? '—';
+        const fixing     = state.fixingKeys.has(issue.key);
+        const resolving  = state.resolvingKeys.has(issue.key);
+        const dismissed  = state.locallyDismissed.has(issue.key);
+        const selected   = state.selectedKeys.has(issue.key);
+        const issueUrl   = state.sonarUri && state.projectKey
             ? `${state.sonarUri}/project/issues?id=${encodeURIComponent(state.projectKey)}&issues=${encodeURIComponent(issue.key)}&open=${encodeURIComponent(issue.key)}${state.currentPRKey ? `&pullRequest=${encodeURIComponent(state.currentPRKey)}` : ''}`
             : '';
-        return `<tr id="irow-${esc(issue.key)}" class="${fixing ? 'row-fixing' : ''}${selected ? ' row-selected' : ''}">
+        const statusKey  = dismissed ? 'DISMISSED' : issue.status;
+        const statusText = dismissed ? 'DISMISSED' : issue.status;
+        const rowStyle   = dismissed ? ' style="opacity:.45"' : '';
+
+        const resolveBtn = dismissed ? '' :
+            resolving
+                ? `<button class="btn btn-secondary btn-sm" disabled title="Resolving…"><span class="spinner" style="border-top-color:currentColor;width:10px;height:10px;border-width:1.5px"></span></button>`
+                : `<button class="btn btn-secondary btn-sm" data-action="resolve" data-issue-key="${esc(issue.key)}" title="Mark resolved in SonarQube">&#10003;</button>`;
+
+        const dismissBtn = dismissed
+            ? `<button class="btn btn-secondary btn-sm" data-action="dismiss" data-issue-key="${esc(issue.key)}" title="Restore issue">&#8635;</button>`
+            : `<button class="btn btn-secondary btn-sm" data-action="dismiss" data-issue-key="${esc(issue.key)}" title="Dismiss locally">&#10005;</button>`;
+
+        return `<tr id="irow-${esc(issue.key)}"${rowStyle} class="${fixing ? 'row-fixing' : ''}${selected ? ' row-selected' : ''}">
             <td><input type="checkbox" class="row-check" data-action="select" data-issue-key="${esc(issue.key)}" ${selected ? 'checked' : ''}></td>
             <td class="cell-sr">${sr}</td>
             <td><span class="sev sev-${issue.severity}">${issue.severity}</span></td>
@@ -525,15 +565,15 @@ function renderIssueRows(issues) {
                 <button class="more-btn" data-action="showMore">more</button>
                 <span class="cell-file">${esc(filePath)}:${line}</span>
             </td>
-            <td><span class="stat stat-${issue.status}" id="stat-${esc(issue.key)}">${issue.status}</span></td>
+            <td><span class="stat stat-${statusKey}" id="stat-${esc(issue.key)}">${statusText}</span></td>
             <td>
                 <div class="action-cell">
-                    <button class="btn btn-primary btn-sm" id="fix-btn-${esc(issue.key)}"
+                    ${dismissed ? '' : `<button class="btn btn-primary btn-sm" id="fix-btn-${esc(issue.key)}"
                         data-action="fix" data-issue-key="${esc(issue.key)}" ${fixing ? 'disabled' : ''}>
                         ${fixing ? '<span class="spinner" style="border-top-color:#fff"></span>' : 'Fix with AI'}
-                    </button>
-                    <button class="btn btn-secondary btn-sm" data-action="resolve"
-                        data-issue-key="${esc(issue.key)}" title="Mark resolved">&#10003;</button>
+                    </button>`}
+                    ${resolveBtn}
+                    ${dismissBtn}
                 </div>
             </td>
         </tr>`;
@@ -624,7 +664,30 @@ function doFix(issueKey) {
 }
 
 function doResolve(issueKey) {
+    state.resolvingKeys.add(issueKey);
+    applyFiltersAndRender();
     vscode.postMessage({ type: 'markResolved', issueKey });
+}
+
+function doDismiss(issueKey) {
+    if (state.locallyDismissed.has(issueKey)) {
+        state.locallyDismissed.delete(issueKey);
+    } else {
+        state.locallyDismissed.add(issueKey);
+        state.selectedKeys.delete(issueKey);
+    }
+    applyFiltersAndRender();
+    updateSelectionUI();
+}
+
+function onResolveStarted(issueKey) {
+    state.resolvingKeys.add(issueKey);
+    applyFiltersAndRender();
+}
+
+function onResolveError(issueKey) {
+    state.resolvingKeys.delete(issueKey);
+    applyFiltersAndRender();
 }
 
 function setFixing(issueKey, active) {
@@ -652,8 +715,10 @@ function onFixError(issueKey, message) {
 }
 
 function onIssueResolved(issueKey) {
-    const stat = document.getElementById(`stat-${issueKey}`);
-    if (stat) { stat.className = 'stat stat-RESOLVED'; stat.textContent = 'RESOLVED'; }
+    state.resolvingKeys.delete(issueKey);
+    const issue = state.issuesMap[issueKey];
+    if (issue) { issue.status = 'RESOLVED'; }
+    applyFiltersAndRender();
 }
 
 /* ── Toast ───────────────────────────────────────────────────────────────── */

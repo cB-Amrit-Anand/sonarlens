@@ -39,13 +39,27 @@ sonar.projectKey=your-project-key</pre>
             <span class="hint">Unique identifier for your project in SonarQube. Found on your project's main page. Auto-filled from <code>sonar-project.properties</code> if present.</span>
         </div>
         <div class="form-group">
+            <label for="token-type">Token Type</label>
+            <select id="token-type" class="filter-input" style="height:28px;width:100%;">
+                <option value="basic">User Token (Basic Auth)</option>
+                <option value="bearer">Bearer Token (SSO / PAT)</option>
+            </select>
+            <span class="hint">Use <em>Bearer Token</em> for SSO tokens or Personal Access Tokens that require Bearer authentication.</span>
+        </div>
+        <div class="form-group">
             <label for="sonar-token">SonarQube Token <span class="required">*</span></label>
-            <input id="sonar-token" type="password" placeholder="squ_xxxxxxxxxxxx" />
+            <div class="input-with-eye">
+                <input id="sonar-token" type="password" placeholder="squ_xxxxxxxxxxxx" />
+                <button class="eye-btn icon-btn" data-target="sonar-token" title="Show/hide token">&#128065;</button>
+            </div>
             <span class="hint">User token from SonarQube → My Account → Security → Generate Token. Needs at least <em>Browse</em> permission on the project.</span>
         </div>
         <div class="form-group">
             <label for="ai-api-key">OpenAI API Key</label>
-            <input id="ai-api-key" type="password" placeholder="sk-…" />
+            <div class="input-with-eye">
+                <input id="ai-api-key" type="password" placeholder="sk-…" />
+                <button class="eye-btn icon-btn" data-target="ai-api-key" title="Show/hide key">&#128065;</button>
+            </div>
             <span class="hint">Optional. Required only for AI-powered fixes. Get it from <em>platform.openai.com → API Keys</em>. Leave blank to use the extension for viewing issues only.</span>
         </div>
         <div class="form-actions">
@@ -106,7 +120,7 @@ sonar.projectKey=your-project-key</pre>
             <div class="tab-toolbar">
                 <span id="pr-badge" class="badge hidden"></span>
                 <span class="spacer"></span>
-                <button id="btn-fix-selected" class="btn btn-primary btn-sm hidden">Fix (<span id="sel-count">0</span>)</button>
+                <button id="btn-fix-selected" class="btn btn-primary btn-sm hidden">Fix with AI (<span id="sel-count">0</span>)</button>
                 <div class="export-wrap">
                     <button id="btn-export" class="btn btn-secondary btn-sm">Export &#9660;</button>
                     <div id="export-menu" class="dropdown-menu hidden">
@@ -140,6 +154,7 @@ sonar.projectKey=your-project-key</pre>
                             <label class="sev-check"><input type="checkbox" class="stat-filter" value="RESOLVED"  checked><span class="stat stat-RESOLVED">RESOLVED</span></label>
                             <label class="sev-check"><input type="checkbox" class="stat-filter" value="FIXED"     checked><span class="stat stat-FIXED">FIXED</span></label>
                             <label class="sev-check"><input type="checkbox" class="stat-filter" value="CLOSED"   checked><span class="stat stat-CLOSED">CLOSED</span></label>
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="DISMISSED"><span class="stat stat-DISMISSED">DISMISSED (local)</span></label>
                         </div>
                     </div>
                 </div>

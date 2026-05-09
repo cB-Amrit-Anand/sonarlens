@@ -60,6 +60,18 @@ body {
 .form-group input:focus { border-color: var(--accent); }
 input[readonly] { opacity: .55; cursor: default; }
 
+.input-with-eye { position: relative; display: flex; align-items: center; }
+.input-with-eye input { flex: 1; padding-right: 30px; }
+.eye-btn {
+    position: absolute;
+    right: 4px;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+    opacity: .6;
+}
+.eye-btn:hover { opacity: 1; }
+
 .hint { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: block; }
 .required { color: var(--error); }
 
@@ -260,6 +272,7 @@ td { padding: 7px 8px; vertical-align: middle; }
 .stat-REOPENED  { background: rgba(244,67,54,.2);   color: var(--error); }
 .stat-FIXED     { background: rgba(78,201,78,.2);   color: var(--success); }
 .stat-CLOSED    { background: rgba(136,136,136,.2); color: var(--text-muted); }
+.stat-DISMISSED { background: rgba(136,136,136,.15); color: var(--text-muted); }
 
 /* ── QG status ───────────────────────────────────────────────────────────── */
 .qg-OK    { color: var(--success); font-weight: 700; }

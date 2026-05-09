@@ -7,7 +7,10 @@
       "params": {
         "project": "The project key (sonar.projectKey)"
       },
-      "auth": "Basic — token as username, empty password",
+      "auth": {
+        "basic": "Basic auth — token as username, empty password (default)",
+        "bearer": "Bearer token — Authorization: Bearer <token> (SSO / PAT)"
+      },
       "response_key": "pullRequests",
       "used_for": "Fetching all pull requests for a project",
       "notes": "Returns array of PR objects with key, title, branch, status.qualityGateStatus, analysisDate"
@@ -22,7 +25,10 @@
         "p": "Page number (1-based)",
         "ps": "Page size (max 500, default 100)"
       },
-      "auth": "Basic — token as username, empty password",
+      "auth": {
+        "basic": "Basic auth — token as username, empty password (default)",
+        "bearer": "Bearer token — Authorization: Bearer <token> (SSO / PAT)"
+      },
       "response_key": "issues",
       "pagination": {
         "sonarqube_v9_and_below": "top-level fields: total, p, ps",
@@ -40,8 +46,13 @@
         "issue": "Issue key",
         "transition": "resolve"
       },
-      "auth": "Basic — token as username, empty password",
-      "used_for": "Marking an issue as resolved in SonarQube"
+      "auth": {
+        "basic": "Basic auth — token as username, empty password (default)",
+        "bearer": "Bearer token — Authorization: Bearer <token> (SSO / PAT)"
+      },
+      "required_permission": "Administer Issues on the project",
+      "used_for": "Marking an issue as resolved in SonarQube",
+      "notes": "Returns HTTP 403 if the token lacks 'Administer Issues' permission. Use local dismiss if you do not have this permission."
     },
     {
       "name": "List Project Branches",
@@ -50,7 +61,10 @@
       "params": {
         "project": "The project key"
       },
-      "auth": "Basic — token as username, empty password",
+      "auth": {
+        "basic": "Basic auth — token as username, empty password (default)",
+        "bearer": "Bearer token — Authorization: Bearer <token> (SSO / PAT)"
+      },
       "response_key": "branches",
       "used_for": "Listing branches (available but not yet surfaced in UI)",
       "notes": "Silently returns [] on error — some SonarQube editions do not expose this endpoint"
@@ -60,9 +74,24 @@
       "method": "GET",
       "endpoint": "/api/system/ping",
       "params": {},
-      "auth": "Basic — token as username, empty password",
+      "auth": {
+        "basic": "Basic auth — token as username, empty password (default)",
+        "bearer": "Bearer token — Authorization: Bearer <token> (SSO / PAT)"
+      },
       "used_for": "Testing connectivity and authentication",
       "notes": "Returns plain text 'pong'. Some SonarCloud configurations may return 404 — extension treats any non-error response as a successful connection"
     }
-  ]
+  ],
+  "auth_modes": {
+    "basic": {
+      "description": "Default. SonarQube user tokens sent as Basic auth username with empty password.",
+      "header": "Authorization: Basic base64(token:)",
+      "when_to_use": "Standard SonarQube user tokens (squ_…) or SonarCloud tokens"
+    },
+    "bearer": {
+      "description": "Bearer token auth for SSO-issued tokens or Personal Access Tokens.",
+      "header": "Authorization: Bearer <token>",
+      "when_to_use": "SSO/SAML/OIDC environments, enterprise SonarQube with PAT, or any setup that issues Bearer-style tokens"
+    }
+  }
 }
