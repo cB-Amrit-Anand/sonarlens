@@ -60,6 +60,18 @@ body {
 .form-group input:focus { border-color: var(--accent); }
 input[readonly] { opacity: .55; cursor: default; }
 
+.input-with-eye { position: relative; display: flex; align-items: center; }
+.input-with-eye input { flex: 1; padding-right: 30px; }
+.eye-btn {
+    position: absolute;
+    right: 4px;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+    opacity: .6;
+}
+.eye-btn:hover { opacity: 1; }
+
 .hint { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: block; }
 .required { color: var(--error); }
 
@@ -102,6 +114,96 @@ input[readonly] { opacity: .55; cursor: default; }
     border-radius: 3px;
     white-space: pre-wrap;
 }
+
+/* ── Auth method tabs (settings) ─────────────────────────────────────────── */
+.auth-method-tabs {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.auth-tab {
+    flex: 1;
+    background: var(--bg2);
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+}
+.auth-tab:not(:last-child) { border-right: 1px solid var(--border); }
+.auth-tab:hover { color: var(--text); background: var(--bg-hover); }
+.auth-tab.active { background: var(--accent); color: #fff; }
+
+.sso-info-box {
+    background: rgba(14,144,217,.08);
+    border: 1px solid rgba(14,144,217,.3);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+#auth-panel-sso              { text-align: center; padding: 4px 0 8px; }
+#auth-panel-sso .sso-info-box,
+#auth-panel-sso .sso-fallback { text-align: left; }
+#btn-sso-login               { padding: 8px 24px; font-size: 12px; margin-bottom: 4px; }
+.sso-waiting {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.sso-logged-in {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: rgba(78,201,78,.1);
+    border: 1px solid rgba(78,201,78,.35);
+    border-radius: var(--radius);
+    text-align: left;
+}
+.sso-logged-in-icon {
+    font-size: 20px;
+    color: var(--success);
+    flex-shrink: 0;
+    line-height: 1;
+}
+.sso-logged-in-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+}
+.sso-logged-in-text strong { color: var(--success); font-size: 12px; }
+.sso-logged-in-text span   { color: var(--text-muted); }
+.sso-fallback {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(232,168,56,.08);
+    border: 1px solid rgba(232,168,56,.3);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+}
+.sso-fallback input {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: 6px 8px;
+    font-size: 12px;
+    outline: none;
+    transition: border-color .12s;
+}
+.sso-fallback input:focus { border-color: var(--accent); }
 
 /* ── Tab bar ─────────────────────────────────────────────────────────────── */
 .tab-bar {
@@ -260,6 +362,7 @@ td { padding: 7px 8px; vertical-align: middle; }
 .stat-REOPENED  { background: rgba(244,67,54,.2);   color: var(--error); }
 .stat-FIXED     { background: rgba(78,201,78,.2);   color: var(--success); }
 .stat-CLOSED    { background: rgba(136,136,136,.2); color: var(--text-muted); }
+.stat-DISMISSED { background: rgba(136,136,136,.15); color: var(--text-muted); }
 
 /* ── QG status ───────────────────────────────────────────────────────────── */
 .qg-OK    { color: var(--success); font-weight: 700; }

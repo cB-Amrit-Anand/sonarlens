@@ -1,0 +1,17 @@
+1. SSO SonarQube Token
+3.When I click tick button, first loader is not running at it is giving me this Permission denied — token needs "Administer Issues" permission in SonarQube
+4. Option to mark a issue complete locally and a filter for that
+5. Eye button to show and hide sonarqube token and openAI keys
+6. Remane fix(*) at the top to fix with AI(*)
+6. List all the Sonarqube APIs used in the extension anc create a json file for API documentation
+
+
+
+1. Create a readme file for the github repo
+2. I need to create the production version of this extension so that any VS code editor, Cursor, Antigraivty code editor can access this extension
+3. Write to steps so that I get get this extension live at those platform
+
+
+
+
+1. Ability to use multiple type of AI token like Open AI, antropic , gemini etc

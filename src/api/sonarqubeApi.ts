@@ -4,6 +4,7 @@ export interface SonarConfig {
     uri: string;
     projectKey: string;
     token: string;
+    tokenType?: 'basic' | 'bearer';
 }
 
 export interface PullRequest {
@@ -53,12 +54,17 @@ export class SonarQubeApi {
 
     constructor(config: SonarConfig) {
         this.config = config;
-        this.client = axios.create({
+        const axiosConfig: Parameters<typeof axios.create>[0] = {
             baseURL: config.uri,
-            auth: { username: config.token, password: '' },
             headers: { 'Content-Type': 'application/json' },
             timeout: 30000
-        });
+        };
+        if (config.tokenType === 'bearer') {
+            (axiosConfig.headers as Record<string, string>)['Authorization'] = `Bearer ${config.token}`;
+        } else {
+            axiosConfig.auth = { username: config.token, password: '' };
+        }
+        this.client = axios.create(axiosConfig);
 
         this.client.interceptors.response.use(
             res => res,
