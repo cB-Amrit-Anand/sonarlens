@@ -259,6 +259,7 @@ td { padding: 7px 8px; vertical-align: middle; }
 .stat-RESOLVED  { background: rgba(78,201,78,.2);   color: var(--success); }
 .stat-REOPENED  { background: rgba(244,67,54,.2);   color: var(--error); }
 .stat-FIXED     { background: rgba(78,201,78,.2);   color: var(--success); }
+.stat-CLOSED    { background: rgba(136,136,136,.2); color: var(--text-muted); }
 
 /* ── QG status ───────────────────────────────────────────────────────────── */
 .qg-OK    { color: var(--success); font-weight: 700; }
@@ -335,11 +336,13 @@ td { padding: 7px 8px; vertical-align: middle; }
 }
 .sev-dropdown-wrap { position: relative; }
 #sev-dropdown-menu,
-#stat-dropdown-menu { left: 0; right: auto; min-width: 150px; }
+#stat-dropdown-menu,
+#qg-dropdown-menu { left: 0; right: auto; min-width: 150px; }
 
-/* rows inside both filter dropdowns */
+/* rows inside filter dropdowns */
 #sev-dropdown-menu .sev-check,
-#stat-dropdown-menu .sev-check {
+#stat-dropdown-menu .sev-check,
+#qg-dropdown-menu .sev-check {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -348,7 +351,8 @@ td { padding: 7px 8px; vertical-align: middle; }
     font-size: 11px;
 }
 #sev-dropdown-menu .sev-check:hover,
-#stat-dropdown-menu .sev-check:hover { background: var(--bg-hover); }
+#stat-dropdown-menu .sev-check:hover,
+#qg-dropdown-menu .sev-check:hover { background: var(--bg-hover); }
 
 /* inside dropdowns: strip chip background, keep the colour */
 #stat-dropdown-menu .stat,
@@ -359,6 +363,12 @@ td { padding: 7px 8px; vertical-align: middle; }
     font-weight: 600;
     border-radius: 0;
     letter-spacing: .3px;
+}
+
+/* date inputs in filter row */
+.filter-date {
+    padding: 0 4px;
+    color-scheme: dark;
 }
 
 .sev-check { display: flex; align-items: center; gap: 3px; cursor: pointer; }
@@ -375,6 +385,7 @@ td { padding: 7px 8px; vertical-align: middle; }
     outline: none;
 }
 .filter-input:focus { border-color: var(--accent); }
+.filter-date { width: auto; flex: 1; min-width: 100px; }
 
 /* ── Export dropdown ─────────────────────────────────────────────────────── */
 .export-wrap { position: relative; }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-    <title>SonarQube AI Fixer</title>
+    <title>SonarLens</title>
     {{STYLES}}
 </head>
 <body>
@@ -80,6 +80,22 @@ sonar.projectKey=your-project-key</pre>
                 <span class="spacer"></span>
                 <button id="btn-open-prs-editor" class="icon-btn" title="Open in Editor Tab">&#10697;</button>
             </div>
+            <div id="pr-filters" class="filter-bar hidden">
+                <div class="filter-row">
+                    <div class="sev-dropdown-wrap">
+                        <button id="qg-dropdown-btn" class="btn btn-secondary btn-sm">QG: All &#9660;</button>
+                        <div id="qg-dropdown-menu" class="dropdown-menu hidden">
+                            <label class="sev-check"><input type="checkbox" class="qg-filter" value="OK"      checked><span>OK</span></label>
+                            <label class="sev-check"><input type="checkbox" class="qg-filter" value="ERROR"   checked><span>ERROR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="qg-filter" value="WARN"    checked><span>WARN</span></label>
+                            <label class="sev-check"><input type="checkbox" class="qg-filter" value="NONE"    checked><span>NONE</span></label>
+                        </div>
+                    </div>
+                    <input id="pr-date-from" type="date" class="filter-input filter-date" title="Analysis date from" />
+                    <input id="pr-date-to"   type="date" class="filter-input filter-date" title="Analysis date to" />
+                </div>
+                <input id="pr-search" type="text" class="filter-input" placeholder="Search PR by key or title…" />
+            </div>
             <div id="prs-container">
                 <div class="empty-state">Click "Fetch PRs" to load pull requests.</div>
             </div>
@@ -123,6 +139,7 @@ sonar.projectKey=your-project-key</pre>
                             <label class="sev-check"><input type="checkbox" class="stat-filter" value="REOPENED"  checked><span class="stat stat-REOPENED">REOPENED</span></label>
                             <label class="sev-check"><input type="checkbox" class="stat-filter" value="RESOLVED"  checked><span class="stat stat-RESOLVED">RESOLVED</span></label>
                             <label class="sev-check"><input type="checkbox" class="stat-filter" value="FIXED"     checked><span class="stat stat-FIXED">FIXED</span></label>
+                            <label class="sev-check"><input type="checkbox" class="stat-filter" value="CLOSED"   checked><span class="stat stat-CLOSED">CLOSED</span></label>
                         </div>
                     </div>
                 </div>

@@ -1,4 +1,4 @@
-# SonarQube AI Fixer — Feature List
+# SonarLens — Feature List
 
 > Update this file after every change.
 
@@ -35,6 +35,7 @@
 - **PR table** — shows PR key, title, branch, quality gate status, analysis date
 - **Sort by column** — click any column header to sort; Analysis Date sorted descending by default
 - **View Issues** — click button on a PR row; Issues tab badge shows PR number and title
+- **PR filters** — text search (key/title), QG multi-select dropdown (OK, ERROR, WARN, NONE), date-range from/to; filter bar appears after first fetch
 
 ---
 
@@ -43,7 +44,7 @@
 - **Paginated issue list** — configurable rows per page (10 / 25 / 50 / 100); default 50; selector in pagination bar
 - **Serial number column** — Sr # column shows absolute row number across pages
 - **Filter by severity** — multi-select dropdown (BLOCKER, CRITICAL, MAJOR, MINOR, INFO); button label shows count when not all selected
-- **Filter by status** — multi-select dropdown (OPEN, CONFIRMED, REOPENED, RESOLVED, FIXED); same label behaviour as severity
+- **Filter by status** — multi-select dropdown (OPEN, CONFIRMED, REOPENED, RESOLVED, FIXED, CLOSED); same label behaviour as severity
 - **Filter by file** — text search on file path, live-filtered
 - **Multi-select** — checkbox per row + Select All checkbox in header
 - **Issue columns** — key, file path, line, severity chip (full name), message, status, actions
@@ -55,7 +56,7 @@
 
 ## AI Fix
 
-- **Single issue fix** — Fix button per row; calls OpenAI `gpt-4o` with code context
+- **Single issue fix** — "Fix with AI" button per row; shows error toast if OpenAI key not configured; calls OpenAI `gpt-4o` with code context
 - **Fix Selected** — fix all checked issues in sequence (shows count in button)
 - **Fix All Low Severity** — fixes all INFO + MINOR issues across all pages for current PR
 - **Diff view** — opens VS Code diff (original ↔ AI fix) before accepting

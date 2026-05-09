@@ -14,6 +14,7 @@ const state = {
     totalIssues:        0,
     pageSize:           50,
     filteredIssues:     /** @type {any[]} */ ([]),
+    hasAiKey:           false,
     fixingKeys:         /** @type {Set<string>} */ (new Set()),
     selectedKeys:       /** @type {Set<string>} */ (new Set()),
     prsList:            /** @type {any[]} */ ([]),
@@ -66,6 +67,7 @@ document.getElementById('btn-save-config')?.addEventListener('click', () => {
     }
     state.sonarUri   = cfg.uri;
     state.projectKey = cfg.projectKey;
+    state.hasAiKey   = !!cfg.aiApiKey;
     vscode.postMessage({ type: 'saveConfig', data: cfg });
 });
 
@@ -77,6 +79,29 @@ document.getElementById('btn-test-conn')?.addEventListener('click', () => {
 document.getElementById('btn-fetch-prs')?.addEventListener('click', () => {
     vscode.postMessage({ type: 'fetchPRs' });
 });
+
+/* ── QG dropdown ─────────────────────────────────────────────────────────── */
+document.getElementById('qg-dropdown-btn')?.addEventListener('click', () => {
+    document.getElementById('qg-dropdown-menu')?.classList.toggle('hidden');
+});
+document.querySelectorAll('.qg-filter').forEach(cb => {
+    cb.addEventListener('change', () => { updateQgDropdownLabel(); renderPRs(); });
+});
+function updateQgDropdownLabel() {
+    const checked = document.querySelectorAll('.qg-filter:checked');
+    const total   = document.querySelectorAll('.qg-filter').length;
+    const btn     = document.getElementById('qg-dropdown-btn');
+    if (btn) {
+        btn.textContent = checked.length === total
+            ? 'QG: All ▾'
+            : `QG: ${checked.length} selected ▾`;
+    }
+}
+
+/* ── PR search + date filters ────────────────────────────────────────────── */
+document.getElementById('pr-search')?. addEventListener('input', () => renderPRs());
+document.getElementById('pr-date-from')?.addEventListener('change', () => renderPRs());
+document.getElementById('pr-date-to')?.addEventListener('change',   () => renderPRs());
 
 /* ── PR table delegation (sort headers + View Issues) ────────────────────── */
 document.getElementById('prs-container')?.addEventListener('click', e => {
@@ -168,6 +193,7 @@ document.addEventListener('click', e => {
     if (!t.closest('.sev-dropdown-wrap')) {
         document.getElementById('sev-dropdown-menu')?.classList.add('hidden');
         document.getElementById('stat-dropdown-menu')?.classList.add('hidden');
+        document.getElementById('qg-dropdown-menu')?.classList.add('hidden');
     }
 });
 
@@ -254,7 +280,7 @@ function onLoadConfig(cfg) {
     if (cfg.uri)        { setVal('sonar-uri', cfg.uri);           state.sonarUri    = cfg.uri; }
     if (cfg.projectKey) { setVal('project-key', cfg.projectKey);  state.projectKey  = cfg.projectKey; }
     if (cfg.token)      setVal('sonar-token', cfg.token);
-    if (cfg.aiApiKey)   setVal('ai-api-key', cfg.aiApiKey);
+    if (cfg.aiApiKey)   { setVal('ai-api-key', cfg.aiApiKey); state.hasAiKey = true; }
     if (cfg.fromFile)   document.getElementById('missing-props-warning')?.classList.add('hidden');
 }
 
@@ -330,8 +356,35 @@ function renderPRs() {
         return;
     }
 
+    // Show filter bar once PRs are loaded
+    document.getElementById('pr-filters')?.classList.remove('hidden');
+
+    // Collect active filters
+    const activeQgs = new Set(
+        [...document.querySelectorAll('.qg-filter:checked')]
+            .map(el => /** @type {HTMLInputElement} */(el).value)
+    );
+    const searchQ    = (/** @type {HTMLInputElement} */(document.getElementById('pr-search'))?.value || '').toLowerCase().trim();
+    const dateFrom   = (/** @type {HTMLInputElement} */(document.getElementById('pr-date-from'))?.value || '');
+    const dateTo     = (/** @type {HTMLInputElement} */(document.getElementById('pr-date-to'))?.value || '');
+
+    const filtered = state.prsList.filter(pr => {
+        const qg = pr.status?.qualityGateStatus || 'NONE';
+        if (!activeQgs.has(qg)) { return false; }
+        if (searchQ) {
+            const text = `${pr.key} ${pr.title || ''}`.toLowerCase();
+            if (!text.includes(searchQ)) { return false; }
+        }
+        if (dateFrom || dateTo) {
+            const d = pr.analysisDate ? pr.analysisDate.substring(0, 10) : '';
+            if (dateFrom && d < dateFrom) { return false; }
+            if (dateTo   && d > dateTo)   { return false; }
+        }
+        return true;
+    });
+
     const { col, dir } = state.prSort;
-    const sorted = [...state.prsList].sort((a, b) => {
+    const sorted = [...filtered].sort((a, b) => {
         let av, bv;
         if (col === 'key')   { av = Number(a.key) || a.key;  bv = Number(b.key) || b.key; }
         if (col === 'title') { av = (a.title || a.key).toLowerCase(); bv = (b.title || b.key).toLowerCase(); }
@@ -344,6 +397,11 @@ function renderPRs() {
         if (av > bv) { return dir === 'asc' ?  1 : -1; }
         return 0;
     });
+
+    if (sorted.length === 0) {
+        container.innerHTML = '<div class="empty-state">No PRs match the current filters.</div>';
+        return;
+    }
 
     const arrow = c => col === c ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
     const th = (c, label) =>
@@ -472,7 +530,7 @@ function renderIssueRows(issues) {
                 <div class="action-cell">
                     <button class="btn btn-primary btn-sm" id="fix-btn-${esc(issue.key)}"
                         data-action="fix" data-issue-key="${esc(issue.key)}" ${fixing ? 'disabled' : ''}>
-                        ${fixing ? '<span class="spinner" style="border-top-color:#fff"></span>' : 'Fix'}
+                        ${fixing ? '<span class="spinner" style="border-top-color:#fff"></span>' : 'Fix with AI'}
                     </button>
                     <button class="btn btn-secondary btn-sm" data-action="resolve"
                         data-issue-key="${esc(issue.key)}" title="Mark resolved">&#10003;</button>
@@ -559,6 +617,7 @@ function exportIssues(format) {
 
 /* ── Issue actions ───────────────────────────────────────────────────────── */
 function doFix(issueKey) {
+    if (!state.hasAiKey) { return showToast('OpenAI API key not configured — add it in Settings (⚙)', 'error'); }
     const issue = state.issuesMap[issueKey];
     if (!issue) { return showToast('Issue data not found — refresh the issues', 'error'); }
     vscode.postMessage({ type: 'fixIssue', issue });
@@ -575,7 +634,7 @@ function setFixing(issueKey, active) {
     if (row) { row.classList.toggle('row-fixing', active); }
     if (btn) {
         /** @type {HTMLButtonElement} */(btn).disabled = active;
-        btn.innerHTML = active ? '<span class="spinner" style="border-top-color:#fff"></span>' : 'Fix';
+        btn.innerHTML = active ? '<span class="spinner" style="border-top-color:#fff"></span>' : 'Fix with AI';
     }
 }
 

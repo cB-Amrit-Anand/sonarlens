@@ -1,12 +1,12 @@
 {
-  "name": "sonarqube-ai-fixer",
-  "displayName": "SonarQube AI Fixer",
+  "name": "sonarlens",
+  "displayName": "SonarLens",
   "description": "Fetch SonarQube issues and fix them using AI",
   "version": "0.1.0",
-  "publisher": "sonarqube-ai-fixer",
+  "publisher": "sonarlens",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cB-Amrit-Anand/sonarqube-ai-fixer"
+    "url": "https://github.com/cB-Amrit-Anand/sonarlens"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -20,24 +20,24 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "sonarqube-ai-fixer-container",
-          "title": "SonarQube AI Fixer",
+          "id": "sonarlens-container",
+          "title": "SonarLens",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "sonarqube-ai-fixer-container": [
+      "sonarlens-container": [
         {
           "type": "webview",
-          "id": "sonarqube-ai-fixer.sidebar",
-          "name": "SonarQube AI Fixer"
+          "id": "sonarlens.sidebar",
+          "name": "SonarLens"
         }
       ]
     },
     "commands": [
       {
-        "command": "sonarqube-ai-fixer.openPanel",
+        "command": "sonarlens.openPanel",
         "title": "Open in Editor Tab",
         "icon": "$(link-external)"
       }
@@ -45,8 +45,8 @@
     "menus": {
       "view/title": [
         {
-          "command": "sonarqube-ai-fixer.openPanel",
-          "when": "view == sonarqube-ai-fixer.sidebar",
+          "command": "sonarlens.openPanel",
+          "when": "view == sonarlens.sidebar",
           "group": "navigation"
         }
       ]

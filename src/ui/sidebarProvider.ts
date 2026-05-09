@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { SonarQubeBaseProvider } from './baseProvider';
 
 export class SonarQubeSidebarProvider extends SonarQubeBaseProvider implements vscode.WebviewViewProvider {
-    public static readonly viewId = 'sonarqube-ai-fixer.sidebar';
+    public static readonly viewId = 'sonarlens.sidebar';
 
     private view?: vscode.WebviewView;
 

@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext) {
             sidebarProvider,
             { webviewOptions: { retainContextWhenHidden: true } }
         ),
-        vscode.commands.registerCommand('sonarqube-ai-fixer.openPanel', () => {
+        vscode.commands.registerCommand('sonarlens.openPanel', () => {
             panelProvider.openPanel();
         })
     );
