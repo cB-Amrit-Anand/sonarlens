@@ -15,3 +15,6 @@
 
 
 1. Ability to use multiple type of AI token like Open AI, antropic , gemini etc
+
+11 JUne 2026
+1. Fetch rules, and verify the code before pushing. Create a script that 
