@@ -2,7 +2,7 @@
   "name": "sonarlens",
   "displayName": "SonarLens",
   "description": "View SonarQube issues inside your editor and fix them with AI — supports SSO, local dismiss, and bulk AI fixes.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "sonarlens",
   "license": "MIT",
   "repository": {
