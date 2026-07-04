@@ -20,7 +20,13 @@ const state = {
     selectedKeys:       /** @type {Set<string>} */ (new Set()),
     locallyDismissed:   /** @type {Set<string>} */ (new Set()),
     prsList:            /** @type {any[]} */ ([]),
-    prSort:             { col: 'date', dir: 'desc' }
+    prSort:             { col: 'date', dir: 'desc' },
+    scanIssues:         /** @type {any[]} */ ([]),
+    scanBranch:         /** @type {string} */ (''),
+    scanDashboardUrl:   /** @type {string} */ (''),
+    allRules:           /** @type {any[]} */ ([]),
+    rulesPage:          1,
+    rulesPageSize:      50
 };
 
 /* ── Page navigation (settings ↔ main) ──────────────────────────────────── */
@@ -331,6 +337,13 @@ window.addEventListener('message', e => {
         case 'ssoTimeout':      return onSsoError();
         case 'toast':           return showToast(msg.message, msg.variant || 'info');
         case 'error':           return showToast(msg.message, 'error');
+        case 'currentBranch':   return onCurrentBranch(msg.branch);
+        case 'syncPreflight':   return onSyncPreflight(msg.profiles, msg.totalRules, msg.estimatedTime);
+        case 'rulesLoaded':     return onRulesLoaded(msg.syncedAt, msg.ruleCount, msg.profiles, msg.rules);
+        case 'scanStarted':     return onScanStarted(msg.branch);
+        case 'scanProgress':    return onScanProgress(msg.message);
+        case 'scanComplete':    return onScanComplete(msg.branch, msg.issues, msg.total, msg.dashboardUrl);
+        case 'scanError':       return onScanError(msg.message);
     }
 });
 
@@ -387,6 +400,22 @@ function onLoading(key, active) {
         btn.querySelector('.spinner')?.classList.toggle('hidden', !active);
         const txt = btn.querySelector('.btn-text');
         if (txt) { txt.textContent = active ? 'Testing…' : 'Test'; }
+        /** @type {HTMLButtonElement} */(btn).disabled = active;
+    }
+    if (key === 'syncRules') {
+        const btn = document.getElementById('btn-sync-rules');
+        if (!btn) { return; }
+        btn.querySelector('.spinner')?.classList.toggle('hidden', !active);
+        const txt = btn.querySelector('.btn-text');
+        if (txt) { txt.textContent = active ? 'Syncing…' : 'Sync Rules'; }
+        /** @type {HTMLButtonElement} */(btn).disabled = active;
+    }
+    if (key === 'scan') {
+        const btn = document.getElementById('btn-scan-branch');
+        if (!btn) { return; }
+        btn.querySelector('.spinner')?.classList.toggle('hidden', !active);
+        const txt = btn.querySelector('.btn-text');
+        if (txt) { txt.textContent = active ? 'Scanning…' : '▶ Scan Branch'; }
         /** @type {HTMLButtonElement} */(btn).disabled = active;
     }
 }
@@ -833,3 +862,589 @@ function esc(str) {
 
 function val(id)      { return /** @type {HTMLInputElement} */(document.getElementById(id))?.value?.trim() ?? ''; }
 function setVal(id, v) { const el = document.getElementById(id); if (el) /** @type {HTMLInputElement} */(el).value = v; }
+
+/* ══════════════════════════════════════════════════════════════════
+   LOCAL SCAN TAB
+══════════════════════════════════════════════════════════════════ */
+
+/* ── Load scan state on tab open ─────────────────────────────────── */
+document.querySelector('[data-tab="scan"]')?.addEventListener('click', () => {
+    vscode.postMessage({ type: 'loadScanState' });
+});
+
+/* ── Sync Rules button → show modal with loading state, fetch preflight ── */
+document.getElementById('btn-sync-rules')?.addEventListener('click', () => {
+    const profilesEl = document.getElementById('sync-modal-profiles');
+    const timeEl     = document.getElementById('sync-modal-time');
+    if (profilesEl) {
+        profilesEl.innerHTML = '<div class="modal-loading"><span class="spinner" style="width:11px;height:11px;border-width:2px;border-top-color:var(--accent);display:inline-block"></span> Fetching profile info…</div>';
+    }
+    if (timeEl) { timeEl.textContent = '…'; }
+    document.getElementById('sync-modal-time-row')?.classList.remove('hidden');
+    const confirmBtn = /** @type {HTMLButtonElement} */(document.getElementById('sync-modal-confirm'));
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Yes, Sync'; }
+    document.getElementById('sync-modal-overlay')?.classList.remove('hidden');
+    vscode.postMessage({ type: 'preflightSyncRules' });
+});
+
+/* ── Scan Branch button ──────────────────────────────────────────── */
+document.getElementById('btn-scan-branch')?.addEventListener('click', () => {
+    vscode.postMessage({ type: 'scanBranch' });
+});
+
+/* ── Copy log button ─────────────────────────────────────────────── */
+document.getElementById('btn-copy-log')?.addEventListener('click', () => {
+    const log = document.getElementById('scan-log');
+    if (!log) { return; }
+    const text = [...log.querySelectorAll('.scan-log-line')].map(el => el.textContent).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btn-copy-log');
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy Log'; }, 2000); }
+    }).catch(() => { showToast('Copy failed — try manually selecting the log', 'warning'); });
+});
+
+/* ── Scan severity dropdown ──────────────────────────────────────── */
+document.getElementById('scan-sev-dropdown-btn')?.addEventListener('click', () => {
+    document.getElementById('scan-sev-dropdown-menu')?.classList.toggle('hidden');
+});
+document.querySelectorAll('.scan-sev-filter').forEach(cb => {
+    cb.addEventListener('change', () => { updateScanSevDropdownLabel(); renderScanIssues(); });
+});
+function updateScanSevDropdownLabel() {
+    const checked = document.querySelectorAll('.scan-sev-filter:checked');
+    const total   = document.querySelectorAll('.scan-sev-filter').length;
+    const btn     = document.getElementById('scan-sev-dropdown-btn');
+    if (btn) {
+        btn.textContent = checked.length === total
+            ? 'Severity: All ▾'
+            : `Severity: ${checked.length} selected ▾`;
+    }
+}
+
+/* ── Scan file filter ────────────────────────────────────────────── */
+document.getElementById('scan-file-search')?.addEventListener('input', () => renderScanIssues());
+
+/* ── Scan issues container delegation ───────────────────────────── */
+document.getElementById('scan-issues-container')?.addEventListener('click', e => {
+    const btn = /** @type {HTMLElement} */(e.target).closest('[data-action="openScanIssue"]');
+    if (btn) {
+        vscode.postMessage({ type: 'openUrl', url: /** @type {HTMLElement} */(btn).dataset.url });
+    }
+});
+document.getElementById('scan-results-summary')?.addEventListener('click', e => {
+    const link = /** @type {HTMLElement} */(e.target).closest('[data-action="openScanUrl"]');
+    if (link) {
+        e.preventDefault();
+        vscode.postMessage({ type: 'openUrl', url: /** @type {HTMLElement} */(link).dataset.url || state.scanDashboardUrl });
+    }
+});
+
+/* ── Message handlers ────────────────────────────────────────────── */
+function onCurrentBranch(branch) {
+    state.scanBranch = branch;
+    const el = document.getElementById('scan-current-branch');
+    if (el) { el.textContent = branch; }
+    const scanBtn = /** @type {HTMLButtonElement} */(document.getElementById('btn-scan-branch'));
+    if (scanBtn) { scanBtn.disabled = false; }
+}
+
+function onSyncPreflight(profiles, totalRules, estimatedTime) {
+    const profilesEl = document.getElementById('sync-modal-profiles');
+    const timeEl     = document.getElementById('sync-modal-time');
+    if (profilesEl) {
+        profilesEl.innerHTML = profiles.map(/** @param {any} p */ p =>
+            `<div class="modal-profile-row">
+                <span class="modal-profile-name">${esc(p.name)}</span>
+                <span class="modal-profile-lang">${esc(p.languageName || p.language)}</span>
+                <span class="modal-profile-count">${p.ruleCount} rules</span>
+            </div>`
+        ).join('') + `<div class="modal-total-row">Total: <strong>${totalRules}</strong> rules</div>`;
+    }
+    if (timeEl) { timeEl.textContent = estimatedTime; }
+    document.getElementById('sync-modal-time-row')?.classList.remove('hidden');
+    const confirmBtn = /** @type {HTMLButtonElement} */(document.getElementById('sync-modal-confirm'));
+    if (confirmBtn) { confirmBtn.disabled = false; }
+}
+
+/** @type {boolean} */
+let _rulesFirstLoad = true;
+
+function onRulesLoaded(syncedAt, ruleCount, profiles, rules) {
+    if (/** @type {any} */(window).__syncTimer) { clearInterval(/** @type {any} */(window).__syncTimer); /** @type {any} */(window).__syncTimer = null; }
+    const bar  = document.getElementById('scan-rules-status');
+    const info = document.getElementById('scan-rules-info');
+    if (bar) { bar.classList.remove('hidden'); }
+
+    const date  = syncedAt ? new Date(syncedAt).toLocaleString() : 'unknown';
+    const langs = profiles ? profiles.map(/** @param {any} p */ p => p.languageName || p.language).join(', ') : '';
+    if (info) {
+        info.innerHTML = `✔ <strong>${ruleCount}</strong> rules synced (${esc(langs)}) — last synced ${esc(date)}
+            &nbsp;<a href="#" id="rules-view-link" style="color:var(--accent);font-size:11px">View rules ›</a>`;
+        document.getElementById('rules-view-link')?.addEventListener('click', e => {
+            e.preventDefault();
+            openRulesViewer();
+        });
+    }
+
+    if (rules && rules.length > 0) {
+        state.allRules = rules;
+        populateLangFilter(rules);
+        // Redirect to rules viewer only when triggered by a fresh sync (not on page restore)
+        if (!_rulesFirstLoad) { openRulesViewer(); }
+    }
+    _rulesFirstLoad = false;
+}
+
+function onScanStarted(branch) {
+    state.scanBranch = branch;
+    document.getElementById('scan-progress-box')?.classList.remove('hidden');
+    document.getElementById('scan-results-summary')?.classList.add('hidden');
+    document.getElementById('scan-issue-filters')?.classList.add('hidden');
+    document.getElementById('scan-error-box')?.classList.add('hidden');
+    const spinner = document.getElementById('scan-progress-spinner');
+    const title   = document.getElementById('scan-progress-title');
+    if (spinner) { spinner.classList.remove('hidden'); }
+    if (title)   { title.textContent = 'Scanning…'; title.style.color = ''; }
+    const log = document.getElementById('scan-log');
+    if (log) { log.innerHTML = ''; }
+    const container = document.getElementById('scan-issues-container');
+    if (container) { container.innerHTML = '<div class="empty-state">Scanning…</div>'; }
+}
+
+function onScanProgress(message) {
+    const log = document.getElementById('scan-log');
+    if (!log) { return; }
+    const line = document.createElement('div');
+    line.className = 'scan-log-line';
+    line.textContent = message;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+}
+
+function onScanComplete(branch, issues, total, dashboardUrl) {
+    // Keep log visible but update header to show done
+    const spinner = document.getElementById('scan-progress-spinner');
+    const title   = document.getElementById('scan-progress-title');
+    if (spinner) { spinner.classList.add('hidden'); }
+    if (title)   { title.textContent = 'Scan complete'; title.style.color = 'var(--success)'; }
+
+    state.scanIssues     = issues || [];
+    state.scanDashboardUrl = dashboardUrl || '';
+
+    const summary = document.getElementById('scan-results-summary');
+    const resultText = document.getElementById('scan-result-text');
+    const dashLink   = /** @type {HTMLElement} */(document.getElementById('scan-dashboard-link'));
+
+    if (summary) { summary.classList.remove('hidden'); }
+    if (resultText) {
+        resultText.textContent = total === 0
+            ? `✔ No issues found on branch “${branch}”`
+            : `⚠ ${total} issue(s) found on branch “${branch}”`;
+        resultText.className = `scan-result-text ${total === 0 ? 'scan-result-ok' : 'scan-result-warn'}`;
+    }
+    if (dashLink) {
+        if (dashboardUrl) {
+            dashLink.classList.remove('hidden');
+            dashLink.dataset.url = dashboardUrl;
+        } else {
+            dashLink.classList.add('hidden');
+        }
+    }
+
+    if (issues && issues.length > 0) {
+        document.getElementById('scan-issue-filters')?.classList.remove('hidden');
+        renderScanIssues();
+    } else {
+        const container = document.getElementById('scan-issues-container');
+        if (container) { container.innerHTML = '<div class="empty-state">✔ No issues found — your branch is clean!</div>'; }
+        document.getElementById('scan-issue-filters')?.classList.add('hidden');
+    }
+}
+
+function onScanError(message) {
+    // Keep log visible — update header, show structured error below log
+    const spinner = document.getElementById('scan-progress-spinner');
+    const title   = document.getElementById('scan-progress-title');
+    if (spinner) { spinner.classList.add('hidden'); }
+    if (title)   { title.textContent = 'Scan failed'; title.style.color = 'var(--error)'; }
+
+    const errBox = document.getElementById('scan-error-box');
+    if (errBox) {
+        errBox.classList.remove('hidden');
+        // Format the message into a readable card
+        const lines = message.split('\n').map(l => l.trim()).filter(Boolean);
+        const isInstallMsg = message.includes('brew install') || message.includes('sonar-scanner not found');
+        if (isInstallMsg) {
+            // Format install instructions with sections
+            const sections = [];
+            let current = null;
+            for (const line of lines) {
+                if (line.endsWith(':')) {
+                    current = { heading: line.slice(0, -1), lines: [] };
+                    sections.push(current);
+                } else if (current) {
+                    current.lines.push(line);
+                } else {
+                    sections.push({ heading: null, lines: [line] });
+                }
+            }
+            errBox.innerHTML = `
+                <div class="scan-err-header">&#10007; sonar-scanner not found</div>
+                <div class="scan-err-body">
+                    ${sections.map(s => `
+                        ${s.heading ? `<div class="scan-err-section">${esc(s.heading)}</div>` : ''}
+                        ${s.lines.map(l => `<div class="scan-err-line"><code>${esc(l)}</code></div>`).join('')}
+                    `).join('')}
+                </div>`;
+        } else {
+            // General error — pull out key lines
+            const errorLines = lines.filter(l => l.includes('ERROR') || l.includes('mandatory') || l.includes('must define'));
+            const display = errorLines.length > 0 ? errorLines : lines.slice(0, 6);
+            errBox.innerHTML = `
+                <div class="scan-err-header">&#10007; Scan failed</div>
+                <div class="scan-err-body">
+                    ${display.map(l => `<div class="scan-err-line">${esc(l)}</div>`).join('')}
+                </div>`;
+        }
+    }
+
+    const container = document.getElementById('scan-issues-container');
+    if (container) { container.innerHTML = ''; }
+}
+
+function renderScanIssues() {
+    const container = document.getElementById('scan-issues-container');
+    if (!container) { return; }
+
+    const activeSevs = new Set(
+        [...document.querySelectorAll('.scan-sev-filter:checked')]
+            .map(el => /** @type {HTMLInputElement} */(el).value)
+    );
+    const fileQ = (/** @type {HTMLInputElement} */(document.getElementById('scan-file-search'))?.value || '').toLowerCase().trim();
+
+    const filtered = state.scanIssues.filter(issue => {
+        if (!activeSevs.has(issue.severity)) { return false; }
+        if (fileQ) {
+            const file = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
+            if (!file.toLowerCase().includes(fileQ)) { return false; }
+        }
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
+        return;
+    }
+
+    const rows = filtered.map((issue, idx) => {
+        const filePath = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
+        const line     = issue.textRange?.startLine ?? issue.line ?? '—';
+        const issueUrl = state.sonarUri && state.projectKey
+            ? `${state.sonarUri}/project/issues?id=${encodeURIComponent(state.projectKey)}&issues=${encodeURIComponent(issue.key)}&open=${encodeURIComponent(issue.key)}&branch=${encodeURIComponent(state.scanBranch)}`
+            : '';
+        return `<tr>
+            <td class="cell-sr">${idx + 1}</td>
+            <td><span class="sev sev-${issue.severity}">${issue.severity}</span></td>
+            <td class="msg-cell">
+                <span class="cell-msg">${issueUrl
+                    ? `<a class="issue-link" data-action="openScanIssue" data-url="${esc(issueUrl)}" href="#" title="Open in SonarQube">${esc(issue.message)}</a>`
+                    : esc(issue.message)}</span>
+                <span class="cell-file">${esc(filePath)}:${line}</span>
+            </td>
+            <td><span class="stat stat-${issue.status}">${issue.status}</span></td>
+            <td><code class="rule-key">${esc(issue.rule)}</code></td>
+        </tr>`;
+    }).join('');
+
+    const filterNote = filtered.length < state.scanIssues.length
+        ? ` (${filtered.length} shown after filters)` : '';
+
+    container.innerHTML = `
+        <div class=”issues-summary”>${state.scanIssues.length} issue(s) on branch “${esc(state.scanBranch)}”${filterNote}</div>
+        <div class=”table-wrapper”>
+            <table>
+                <thead>
+                    <tr>
+                        <th class=”cell-sr”>#</th>
+                        <th>Sev</th>
+                        <th>Message / File</th>
+                        <th>Status</th>
+                        <th>Rule</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SYNC CONFIRMATION MODAL
+══════════════════════════════════════════════════════════════════ */
+
+document.getElementById('sync-modal-close')?.addEventListener('click', closeSyncModal);
+document.getElementById('sync-modal-cancel')?.addEventListener('click', closeSyncModal);
+document.getElementById('sync-modal-overlay')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('sync-modal-overlay')) { closeSyncModal(); }
+});
+document.getElementById('sync-modal-confirm')?.addEventListener('click', () => {
+    closeSyncModal();
+    const bar  = document.getElementById('scan-rules-status');
+    const info = document.getElementById('scan-rules-info');
+    if (bar)  { bar.classList.remove('hidden'); }
+    // Show elapsed timer while syncing
+    let elapsed = 0;
+    const syncTimer = setInterval(() => {
+        elapsed++;
+        if (info) { info.innerHTML = `<span class="spinner" style="width:11px;height:11px;border-width:2px;border-top-color:var(--accent);display:inline-block;vertical-align:middle;margin-right:6px"></span> Syncing rules… ${elapsed}s`; }
+    }, 1000);
+    if (info) { info.innerHTML = `<span class="spinner" style="width:11px;height:11px;border-width:2px;border-top-color:var(--accent);display:inline-block;vertical-align:middle;margin-right:6px"></span> Syncing rules… 0s`; }
+    // Store timer id so rulesLoaded can clear it
+    /** @type {any} */(window).__syncTimer = syncTimer;
+    vscode.postMessage({ type: 'syncRules' });
+});
+
+function closeSyncModal() {
+    document.getElementById('sync-modal-overlay')?.classList.add('hidden');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RULES VIEWER PAGE
+══════════════════════════════════════════════════════════════════ */
+
+const RULES_PAGE_SIZE = 50;
+
+function openRulesViewer() {
+    state.rulesPage = 1;
+    renderLangIndex();
+    showPage('rules-index');
+}
+
+function openRulesForLang(lang) {
+    // Pre-set the language filter then show rules page
+    const sel = /** @type {HTMLSelectElement} */(document.getElementById('rules-filter-lang'));
+    if (sel) { sel.value = lang; }
+    const typeSel = /** @type {HTMLSelectElement} */(document.getElementById('rules-filter-type'));
+    if (typeSel) { typeSel.value = ''; }
+    const sevSel = /** @type {HTMLSelectElement} */(document.getElementById('rules-filter-severity'));
+    if (sevSel) { sevSel.value = ''; }
+    const search = /** @type {HTMLInputElement} */(document.getElementById('rules-search'));
+    if (search) { search.value = ''; }
+    state.rulesPage = 1;
+    showPage('rules');
+    renderRules();
+}
+
+document.getElementById('btn-rules-index-back')?.addEventListener('click', () => showPage('main'));
+document.getElementById('btn-rules-back')?.addEventListener('click', () => {
+    showPage('rules-index');
+});
+
+// Rules container delegation — open rule in browser on click
+document.getElementById('rules-list-container')?.addEventListener('click', e => {
+    const card = /** @type {HTMLElement} */(e.target)?.closest('[data-rule-url]');
+    if (card) {
+        const url = /** @type {HTMLElement} */(card).dataset.ruleUrl;
+        if (url) { vscode.postMessage({ type: 'openUrl', url }); }
+    }
+});
+
+// Lang grid delegation
+document.getElementById('rules-lang-grid')?.addEventListener('click', e => {
+    const tile = /** @type {HTMLElement} */(e.target)?.closest('[data-lang]');
+    if (tile) { openRulesForLang(/** @type {HTMLElement} */(tile).dataset.lang || ''); }
+});
+
+const LANG_ICONS = {
+    java: '☕', js: '🟨', ts: '🔷', py: '🐍', cs: 'C#', go: '🐹',
+    php: '🐘', ruby: '💎', kotlin: 'K', swift: '🦅', scala: 'Sc',
+    cpp: 'C++', c: 'C', xml: 'XML', css: 'CSS', web: '🌐',
+    html: 'HTML', docker: '🐳', terraform: 'TF', cloudformation: 'CF'
+};
+
+function renderLangIndex() {
+    const grid  = document.getElementById('rules-lang-grid');
+    const total = document.getElementById('rules-index-total');
+    if (!grid) { return; }
+
+    // Count rules per language
+    /** @type {Map<string, {langName: string, count: number, bugs: number, vulns: number, smells: number}>} */
+    const langMap = new Map();
+    for (const r of state.allRules) {
+        const lang = r.lang || 'other';
+        if (!langMap.has(lang)) {
+            langMap.set(lang, { langName: r.langName || lang, count: 0, bugs: 0, vulns: 0, smells: 0 });
+        }
+        const entry = langMap.get(lang);
+        entry.count++;
+        if (r.type === 'BUG')           { entry.bugs++; }
+        if (r.type === 'VULNERABILITY' || r.type === 'SECURITY_HOTSPOT') { entry.vulns++; }
+        if (r.type === 'CODE_SMELL')    { entry.smells++; }
+    }
+
+    if (total) { total.textContent = `${state.allRules.length} total rules`; }
+
+    const sorted = [...langMap.entries()].sort((a, b) => b[1].count - a[1].count);
+    grid.innerHTML = sorted.map(([lang, info]) => {
+        const icon = LANG_ICONS[lang] || lang.substring(0, 2).toUpperCase();
+        return `<div class="lang-tile" data-lang="${esc(lang)}" title="View ${esc(info.langName)} rules">
+            <div class="lang-tile-icon">${icon}</div>
+            <div class="lang-tile-name">${esc(info.langName)}</div>
+            <div class="lang-tile-count">${info.count} rules</div>
+            <div class="lang-tile-breakdown">
+                ${info.bugs    ? `<span class="lt-bug">${info.bugs}B</span>` : ''}
+                ${info.vulns   ? `<span class="lt-vuln">${info.vulns}V</span>` : ''}
+                ${info.smells  ? `<span class="lt-smell">${info.smells}S</span>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+document.getElementById('rules-search')?.addEventListener('input', () => {
+    state.rulesPage = 1;
+    renderRules();
+});
+document.getElementById('rules-filter-type')?.addEventListener('change', () => {
+    state.rulesPage = 1;
+    renderRules();
+});
+document.getElementById('rules-filter-severity')?.addEventListener('change', () => {
+    state.rulesPage = 1;
+    renderRules();
+});
+document.getElementById('rules-filter-lang')?.addEventListener('change', () => {
+    state.rulesPage = 1;
+    renderRules();
+});
+
+document.getElementById('rules-btn-prev')?.addEventListener('click', () => {
+    if (state.rulesPage > 1) { state.rulesPage--; renderRules(); }
+});
+document.getElementById('rules-btn-next')?.addEventListener('click', () => {
+    state.rulesPage++;
+    renderRules();
+});
+
+function populateLangFilter(rules) {
+    const langs = [...new Map(rules.map(/** @param {any} r */ r => [r.lang, r.langName || r.lang])).entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]));
+    const sel = document.getElementById('rules-filter-lang');
+    if (!sel) { return; }
+    sel.innerHTML = '<option value=””>All Languages</option>';
+    for (const [lang, langName] of langs) {
+        const opt = document.createElement('option');
+        opt.value = lang;
+        opt.textContent = langName;
+        sel.appendChild(opt);
+    }
+}
+
+function getRulesFiltered() {
+    const q    = (/** @type {HTMLInputElement} */(document.getElementById('rules-search'))?.value || '').toLowerCase().trim();
+    const type = (/** @type {HTMLSelectElement} */(document.getElementById('rules-filter-type'))?.value || '');
+    const sev  = (/** @type {HTMLSelectElement} */(document.getElementById('rules-filter-severity'))?.value || '');
+    const lang = (/** @type {HTMLSelectElement} */(document.getElementById('rules-filter-lang'))?.value || '');
+
+    return state.allRules.filter(/** @param {any} r */ r => {
+        if (type && r.type !== type)    { return false; }
+        if (sev  && r.severity !== sev) { return false; }
+        if (lang && r.lang !== lang)    { return false; }
+        if (q) {
+            const text = `${r.key} ${r.name}`.toLowerCase();
+            if (!text.includes(q))      { return false; }
+        }
+        return true;
+    });
+}
+
+const TYPE_LABELS = { BUG: 'Bug', VULNERABILITY: 'Vulnerability', CODE_SMELL: 'Code Smell', SECURITY_HOTSPOT: 'Hotspot' };
+const TYPE_CLASS  = { BUG: 'type-bug', VULNERABILITY: 'type-vuln', CODE_SMELL: 'type-smell', SECURITY_HOTSPOT: 'type-hotspot' };
+
+const TYPE_ORDER = ['BUG', 'VULNERABILITY', 'SECURITY_HOTSPOT', 'CODE_SMELL'];
+
+function renderRules() {
+    const container  = document.getElementById('rules-list-container');
+    const pagination = document.getElementById('rules-pagination');
+    const badge      = document.getElementById('rules-count-badge');
+    if (!container) { return; }
+
+    const filtered = getRulesFiltered();
+    if (badge) { badge.textContent = `${filtered.length} rules`; }
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class=”empty-state”>No rules match the current filters.</div>';
+        pagination?.classList.add('hidden');
+        return;
+    }
+
+    // When no type filter active → group by category, no pagination
+    const typeFilter = (/** @type {HTMLSelectElement} */(document.getElementById('rules-filter-type'))?.value || '');
+    if (!typeFilter) {
+        pagination?.classList.add('hidden');
+        // Group by type
+        /** @type {Record<string, any[]>} */
+        const groups = {};
+        for (const r of filtered) {
+            const t = r.type || 'OTHER';
+            if (!groups[t]) { groups[t] = []; }
+            groups[t].push(r);
+        }
+        const orderedTypes = [
+            ...TYPE_ORDER.filter(t => groups[t]),
+            ...Object.keys(groups).filter(t => !TYPE_ORDER.includes(t))
+        ];
+        container.innerHTML = orderedTypes.map(type => {
+            const rules     = groups[type];
+            const typeLabel = TYPE_LABELS[type] || type;
+            const typeCls   = TYPE_CLASS[type]  || 'type-other';
+            const rows = rules.map(r => ruleCardHtml(r)).join('');
+            return `<div class=”rules-category”>
+                <div class=”rules-category-header”>
+                    <span class=”rule-type-badge ${typeCls}”>${esc(typeLabel)}</span>
+                    <span class=”rules-category-count”>${rules.length} rules</span>
+                </div>
+                ${rows}
+            </div>`;
+        }).join('');
+        return;
+    }
+
+    // Type filter active → flat paginated list
+    const totalPages = Math.ceil(filtered.length / RULES_PAGE_SIZE);
+    if (state.rulesPage > totalPages) { state.rulesPage = totalPages; }
+    const start = (state.rulesPage - 1) * RULES_PAGE_SIZE;
+    container.innerHTML = filtered.slice(start, start + RULES_PAGE_SIZE).map(r => ruleCardHtml(r)).join('');
+
+    const pageInfo = document.getElementById('rules-page-info');
+    const btnPrev  = /** @type {HTMLButtonElement} */(document.getElementById('rules-btn-prev'));
+    const btnNext  = /** @type {HTMLButtonElement} */(document.getElementById('rules-btn-next'));
+    if (pageInfo) { pageInfo.textContent = `${state.rulesPage} / ${totalPages}`; }
+    if (btnPrev)  { btnPrev.disabled = state.rulesPage <= 1; }
+    if (btnNext)  { btnNext.disabled = state.rulesPage >= totalPages; }
+    pagination?.classList.toggle('hidden', totalPages <= 1);
+}
+
+/** @param {any} r */
+function ruleCardHtml(r) {
+    const typeLabel = TYPE_LABELS[r.type] || r.type || '—';
+    const typeCls   = TYPE_CLASS[r.type]  || 'type-other';
+    const sev       = r.severity || 'INFO';
+    const desc = r.htmlDesc
+        ? r.htmlDesc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 200)
+        : '';
+    const ruleUrl = state.sonarUri
+        ? `${state.sonarUri}/coding_rules?rule_key=${encodeURIComponent(r.key)}`
+        : '';
+    return `<div class=”rule-card rule-sev-${sev}” data-rule-url=”${esc(ruleUrl)}” title=”Click to open rule in SonarQube”>
+        <div class=”rule-card-header”>
+            <span class=”rule-card-name”>${esc(r.name)}</span>
+            <span class=”rule-card-badges”>
+                <span class=”sev sev-${sev}”>${sev}</span>
+                <span class=”rule-type-badge ${typeCls}”>${esc(typeLabel)}</span>
+                <span class=”rule-lang-badge”>${esc(r.langName || r.lang)}</span>
+            </span>
+        </div>
+        <div class=”rule-card-key”>${esc(r.key)}</div>
+        ${desc ? `<div class=”rule-card-desc”>${esc(desc)}${r.htmlDesc && r.htmlDesc.replace(/<[^>]+>/g,'').trim().length > 200 ? '…' : ''}</div>` : ''}
+        ${ruleUrl ? `<div class=”rule-card-link”>Open in SonarQube ↗</div>` : ''}
+    </div>`;
+}

@@ -121,6 +121,7 @@ sonar.projectKey=your-project-key</pre>
         <div class="tab-bar">
             <button class="tab-btn active" data-tab="prs">Pull Requests</button>
             <button class="tab-btn" data-tab="issues">Issues</button>
+            <button class="tab-btn" data-tab="scan">Local Scan</button>
             <span class="spacer"></span>
             <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         </div>
@@ -219,11 +220,152 @@ sonar.projectKey=your-project-key</pre>
             </div>
         </div>
 
+        <!-- ── Local Scan Tab ── -->
+        <div id="tab-scan" class="tab-panel">
+            <div class="tab-toolbar">
+                <div class="scan-branch-info">
+                    <span class="scan-branch-label">Branch:</span>
+                    <span id="scan-current-branch" class="badge">detecting…</span>
+                </div>
+                <span class="spacer"></span>
+                <button id="btn-sync-rules" class="btn btn-secondary btn-sm">
+                    <span class="btn-text">Sync Rules</span>
+                    <span class="spinner hidden"></span>
+                </button>
+                <button id="btn-scan-branch" class="btn btn-primary btn-sm" disabled>
+                    <span class="btn-text">&#9654; Scan Branch</span>
+                    <span class="spinner hidden"></span>
+                </button>
+            </div>
+
+            <div id="scan-rules-status" class="scan-status-bar hidden">
+                <span id="scan-rules-info"></span>
+            </div>
+
+            <div id="scan-progress-box" class="scan-progress-box hidden">
+                <div class="scan-progress-header">
+                    <span id="scan-progress-spinner" class="spinner" style="width:12px;height:12px;border-width:2px;border-top-color:var(--accent)"></span>
+                    <strong id="scan-progress-title">Scanning…</strong>
+                    <span class="spacer"></span>
+                    <button id="btn-copy-log" class="btn btn-secondary btn-sm" style="font-size:10px;padding:2px 7px" title="Copy log">Copy Log</button>
+                </div>
+                <div id="scan-log" class="scan-log"></div>
+                <div id="scan-error-box" class="scan-error-box hidden"></div>
+            </div>
+
+            <div id="scan-results-summary" class="hidden">
+                <div class="scan-summary-row">
+                    <span id="scan-result-text" class="scan-result-text"></span>
+                    <a id="scan-dashboard-link" class="scan-dashboard-link hidden" href="#" data-action="openScanUrl">View on SonarQube &#8599;</a>
+                </div>
+            </div>
+
+            <div id="scan-issue-filters" class="filter-bar hidden">
+                <div class="filter-row">
+                    <div class="sev-dropdown-wrap">
+                        <button id="scan-sev-dropdown-btn" class="btn btn-secondary btn-sm">Severity: All &#9660;</button>
+                        <div id="scan-sev-dropdown-menu" class="dropdown-menu hidden">
+                            <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="BLOCKER"  checked><span class="sev sev-BLOCKER">BLOCKER</span></label>
+                            <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="CRITICAL" checked><span class="sev sev-CRITICAL">CRITICAL</span></label>
+                            <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="MAJOR"    checked><span class="sev sev-MAJOR">MAJOR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="MINOR"    checked><span class="sev sev-MINOR">MINOR</span></label>
+                            <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="INFO"     checked><span class="sev sev-INFO">INFO</span></label>
+                        </div>
+                    </div>
+                </div>
+                <input id="scan-file-search" type="text" class="filter-input" placeholder="Filter by file…" />
+            </div>
+
+            <div id="scan-issues-container">
+                <div class="empty-state">Sync your org rules, then click "Scan Branch" to check your local changes.</div>
+            </div>
+        </div>
+
     </div><!-- /#page-main -->
 
 </div><!-- /.app -->
 
+<!-- ══════════════════════════════════════
+     SYNC RULES CONFIRMATION MODAL
+══════════════════════════════════════ -->
+<div id="sync-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <strong>Sync Org Rules</strong>
+            <button id="sync-modal-close" class="icon-btn modal-close-btn">&#10005;</button>
+        </div>
+        <div class="modal-body">
+            <div id="sync-modal-profiles" class="modal-profiles"></div>
+            <div id="sync-modal-time-row" class="modal-estimate hidden">
+                <span class="modal-estimate-label">Estimated sync time:</span>
+                <span id="sync-modal-time" class="modal-estimate-val">—</span>
+            </div>
+            <p class="modal-note">Rules will be saved locally and used for branch scanning.</p>
+        </div>
+        <div class="modal-footer">
+            <button id="sync-modal-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+            <button id="sync-modal-confirm" class="btn btn-primary btn-sm">Sync Now</button>
+        </div>
+    </div>
+</div>
+
 <div id="toast-container" aria-live="polite"></div>
+
+<!-- ══════════════════════════════════════
+     RULES LANGUAGE INDEX PAGE
+══════════════════════════════════════ -->
+<div id="page-rules-index" class="page">
+    <div class="settings-header">
+        <button id="btn-rules-index-back" class="icon-btn" title="Back">&#8592; Back</button>
+        <span class="settings-title">Org Rules</span>
+        <span id="rules-index-total" class="badge" style="margin-left:8px"></span>
+    </div>
+    <p class="rules-index-subtitle">Select a language to view its rules</p>
+    <div id="rules-lang-grid" class="rules-lang-grid"></div>
+</div>
+
+<!-- ══════════════════════════════════════
+     RULES VIEWER PAGE
+══════════════════════════════════════ -->
+<div id="page-rules" class="page">
+    <div class="settings-header">
+        <button id="btn-rules-back" class="icon-btn" title="Back">&#8592; Back</button>
+        <span class="settings-title">Org Rules</span>
+        <span id="rules-count-badge" class="badge" style="margin-left:8px"></span>
+    </div>
+
+    <div class="rules-toolbar">
+        <input id="rules-search" type="text" class="filter-input" placeholder="Search by name or rule key…" />
+        <div class="rules-filters">
+            <select id="rules-filter-type" class="filter-input rules-select">
+                <option value="">All Types</option>
+                <option value="BUG">Bug</option>
+                <option value="VULNERABILITY">Vulnerability</option>
+                <option value="CODE_SMELL">Code Smell</option>
+                <option value="SECURITY_HOTSPOT">Security Hotspot</option>
+            </select>
+            <select id="rules-filter-severity" class="filter-input rules-select">
+                <option value="">All Severities</option>
+                <option value="BLOCKER">Blocker</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="MAJOR">Major</option>
+                <option value="MINOR">Minor</option>
+                <option value="INFO">Info</option>
+            </select>
+            <select id="rules-filter-lang" class="filter-input rules-select">
+                <option value="">All Languages</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="rules-list-container" class="rules-list-container"></div>
+
+    <div id="rules-pagination" class="pagination hidden">
+        <button id="rules-btn-prev" class="btn btn-secondary btn-sm" disabled>&#8592; Prev</button>
+        <span id="rules-page-info" class="page-info">1 / 1</span>
+        <button id="rules-btn-next" class="btn btn-secondary btn-sm">Next &#8594;</button>
+    </div>
+</div>
 
 {{SCRIPT}}
 </body>

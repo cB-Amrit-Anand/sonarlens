@@ -3,15 +3,22 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as net from 'net';
-import { SonarQubeApi, SonarConfig, SonarIssue } from '../api/sonarqubeApi';
+import { SonarQubeApi, SonarConfig, SonarIssue, SonarRule, SonarQualityProfile } from '../api/sonarqubeApi';
 import { AiFixProvider } from '../ai/aiFixProvider';
 import {
     resolveFilePath, readFileContent, extractCodeSnippet,
     applyLineFix, writeFile, openDiffView, getWorkspaceRoot, readSonarProperties
 } from '../utils/fileUtils';
-import { commitFix, isGitRepo } from '../utils/gitUtils';
+import { commitFix, isGitRepo, getCurrentBranch } from '../utils/gitUtils';
+import { runSonarScanner, pollCeTask } from '../utils/scannerUtils';
 
 interface SaveConfigPayload extends SonarConfig { aiApiKey: string; tokenType: 'basic' | 'bearer'; }
+
+interface StoredRulesCache {
+    syncedAt: string;
+    profiles: SonarQualityProfile[];
+    rules: SonarRule[];
+}
 
 export abstract class SonarQubeBaseProvider {
     protected sonarApi?: SonarQubeApi;
@@ -55,6 +62,18 @@ export abstract class SonarQubeBaseProvider {
         }
 
         this.post({ type: 'configStatus', configured: !!(validProps && storedToken) });
+
+        // Restore cached rules status and current branch for the scan tab
+        const cache = this.context.globalState.get<StoredRulesCache>('sonarRulesCache');
+        if (cache) {
+            this.post({ type: 'rulesLoaded', syncedAt: cache.syncedAt, ruleCount: cache.rules.length, profiles: cache.profiles, rules: cache.rules });
+        }
+        const root2 = getWorkspaceRoot();
+        if (root2) {
+            getCurrentBranch(root2).then(branch => {
+                if (branch) { this.post({ type: 'currentBranch', branch }); }
+            }).catch(() => {});
+        }
     }
 
     protected async handleMessage(message: { type: string; [key: string]: any }): Promise<void> {
@@ -71,6 +90,10 @@ export abstract class SonarQubeBaseProvider {
             case 'export':         return this.handleExport(message.format, message.content, message.filename);
             case 'openInPanel':    return this.handleOpenInPanel();
             case 'openUrl':        return this.handleOpenUrl(message.url);
+            case 'preflightSyncRules': return this.handlePreflightSyncRules();
+            case 'syncRules':      return this.handleSyncRules();
+            case 'scanBranch':     return this.handleScanBranch();
+            case 'loadScanState':  return this.handleLoadScanState();
         }
     }
 
@@ -355,6 +378,176 @@ export abstract class SonarQubeBaseProvider {
         if (!uri) { return; }
         await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf-8'));
         this.toast(`Exported to ${path.basename(uri.fsPath)}`, 'success');
+    }
+
+    protected async handleLoadScanState(): Promise<void> {
+        const cache = this.context.globalState.get<StoredRulesCache>('sonarRulesCache');
+        if (cache) {
+            this.post({ type: 'rulesLoaded', syncedAt: cache.syncedAt, ruleCount: cache.rules.length, profiles: cache.profiles, rules: cache.rules });
+        }
+        const root = getWorkspaceRoot();
+        if (root) {
+            const branch = await getCurrentBranch(root);
+            if (branch) { this.post({ type: 'currentBranch', branch }); }
+        }
+    }
+
+    protected async handlePreflightSyncRules(): Promise<void> {
+        if (!this.sonarApi) { return this.toast('Save configuration first', 'error'); }
+        this.post({ type: 'loading', key: 'syncRules', value: true });
+        try {
+            const profiles = await this.sonarApi.getQualityProfiles();
+            if (profiles.length === 0) {
+                return this.toast('No quality profiles found for this project', 'warning');
+            }
+            // Fetch rule counts per profile in parallel
+            const counts = await Promise.all(
+                profiles.map(p => this.sonarApi!.getRuleCount(p.key))
+            );
+            const totalRules = counts.reduce((a, b) => a + b, 0);
+            // Estimate: ~500 rules/request, ~1s per request + overhead
+            const estimatedSeconds = Math.max(5, Math.ceil(totalRules / 500) * profiles.length * 2);
+            const estimatedDisplay = estimatedSeconds < 60
+                ? `~${estimatedSeconds}s`
+                : `~${Math.ceil(estimatedSeconds / 60)}m`;
+
+            this.post({
+                type: 'syncPreflight',
+                profiles: profiles.map((p, i) => ({ ...p, ruleCount: counts[i] })),
+                totalRules,
+                estimatedTime: estimatedDisplay
+            });
+        } catch (err: any) {
+            this.toast(`Failed to fetch profile info: ${err.message}`, 'error');
+        } finally {
+            this.post({ type: 'loading', key: 'syncRules', value: false });
+        }
+    }
+
+    protected async handleSyncRules(): Promise<void> {
+        if (!this.sonarApi) { return this.toast('Save configuration first', 'error'); }
+        this.post({ type: 'loading', key: 'syncRules', value: true });
+        try {
+            const profiles = await this.sonarApi.getQualityProfiles();
+            if (profiles.length === 0) {
+                return this.toast('No quality profiles found for this project', 'warning');
+            }
+
+            const allRules: SonarRule[] = [];
+            for (const profile of profiles) {
+                let page = 1;
+                while (true) {
+                    const { rules, total } = await this.sonarApi.getRules(profile.key, page, 500);
+                    allRules.push(...rules);
+                    if (page * 500 >= total) { break; }
+                    page++;
+                }
+            }
+
+            const cache: StoredRulesCache = {
+                syncedAt: new Date().toISOString(),
+                profiles,
+                rules: allRules
+            };
+            await this.context.globalState.update('sonarRulesCache', cache);
+
+            this.post({
+                type: 'rulesLoaded',
+                syncedAt: cache.syncedAt,
+                ruleCount: allRules.length,
+                profiles,
+                rules: allRules
+            });
+            this.toast(`Synced ${allRules.length} rules from ${profiles.length} quality profile(s)`, 'success');
+        } catch (err: any) {
+            this.toast(`Failed to sync rules: ${err.message}`, 'error');
+        } finally {
+            this.post({ type: 'loading', key: 'syncRules', value: false });
+        }
+    }
+
+    protected async handleScanBranch(): Promise<void> {
+        if (!this.sonarApi) { return this.toast('Save configuration first', 'error'); }
+
+        const root = getWorkspaceRoot();
+        if (!root) { return this.toast('No workspace folder open', 'error'); }
+
+        const branch = await getCurrentBranch(root);
+        if (!branch) { return this.toast('Could not determine current git branch', 'error'); }
+
+        const cache = this.context.globalState.get<StoredRulesCache>('sonarRulesCache');
+        if (!cache) { return this.toast('Sync rules first before scanning', 'warning'); }
+
+        this.post({ type: 'scanStarted', branch });
+        this.post({ type: 'loading', key: 'scan', value: true });
+
+        try {
+            this.post({ type: 'scanProgress', message: `Running sonar-scanner on branch: ${branch}` });
+
+            const scanResult = await runSonarScanner(root, branch, (line) => {
+                // Forward meaningful sonar-scanner output lines
+                if (line.includes('ERROR') || line.includes('WARN') || line.includes('INFO')) {
+                    this.post({ type: 'scanProgress', message: line.trim() });
+                }
+            });
+
+            if (!scanResult.success) {
+                this.post({ type: 'scanError', message: scanResult.output });
+                this.toast('sonar-scanner failed — check the scan log', 'error');
+                return;
+            }
+
+            if (!scanResult.ceTaskUrl) {
+                this.post({ type: 'scanError', message: 'sonar-scanner completed but report-task.txt not found. Check sonar-project.properties.' });
+                return;
+            }
+
+            this.post({ type: 'scanProgress', message: 'Analysis uploaded — waiting for server processing…' });
+
+            const storedToken = await this.context.secrets.get('sonarToken') || '';
+            const tokenType = this.context.globalState.get<'basic' | 'bearer'>('sonarTokenType') || 'basic';
+
+            const ceResult = await pollCeTask(
+                scanResult.ceTaskUrl,
+                storedToken,
+                tokenType,
+                (status) => {
+                    this.post({ type: 'scanProgress', message: `Server analysis status: ${status}` });
+                }
+            );
+
+            if (ceResult.status !== 'SUCCESS') {
+                this.post({ type: 'scanError', message: `Server analysis ${ceResult.status} — check SonarQube logs` });
+                this.toast(`Analysis ${ceResult.status}`, 'error');
+                return;
+            }
+
+            this.post({ type: 'scanProgress', message: 'Fetching issues from server…' });
+
+            const allIssues: SonarIssue[] = [];
+            let page = 1;
+            while (true) {
+                const result = await this.sonarApi.getBranchIssues(branch, page, 100);
+                allIssues.push(...result.issues);
+                if (page * result.ps >= result.total) { break; }
+                page++;
+            }
+
+            this.post({
+                type: 'scanComplete',
+                branch,
+                issues: allIssues,
+                total: allIssues.length,
+                dashboardUrl: scanResult.dashboardUrl
+            });
+            this.toast(`Scan complete — ${allIssues.length} issue(s) found on branch ${branch}`, allIssues.length === 0 ? 'success' : 'warning');
+
+        } catch (err: any) {
+            this.post({ type: 'scanError', message: err.message });
+            this.toast(`Scan failed: ${err.message}`, 'error');
+        } finally {
+            this.post({ type: 'loading', key: 'scan', value: false });
+        }
     }
 
     protected getWebviewContent(): string {

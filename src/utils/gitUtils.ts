@@ -12,6 +12,16 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
     }
 }
 
+export async function getCurrentBranch(cwd: string): Promise<string | undefined> {
+    try {
+        const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd });
+        const branch = stdout.trim();
+        return branch === 'HEAD' ? undefined : branch;
+    } catch {
+        return undefined;
+    }
+}
+
 export async function stageFile(filePath: string, cwd: string): Promise<void> {
     await execAsync(`git add "${filePath}"`, { cwd });
 }

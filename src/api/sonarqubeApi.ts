@@ -48,6 +48,27 @@ export interface IssuesResponse {
     ps: number;
 }
 
+export interface SonarRule {
+    key: string;
+    name: string;
+    severity: string;
+    type: string;
+    lang: string;
+    langName: string;
+    status: string;
+    htmlDesc?: string;
+    tags?: string[];
+}
+
+export interface SonarQualityProfile {
+    key: string;
+    name: string;
+    language: string;
+    languageName: string;
+    isDefault: boolean;
+    activeRuleCount: number;
+}
+
 export class SonarQubeApi {
     private client: AxiosInstance;
     private config: SonarConfig;
@@ -151,5 +172,56 @@ export class SonarQubeApi {
         } catch {
             return false;
         }
+    }
+
+    async getQualityProfiles(): Promise<SonarQualityProfile[]> {
+        const response = await this.client.get('/api/qualityprofiles/search', {
+            params: { project: this.config.projectKey }
+        });
+        return response.data.profiles || [];
+    }
+
+    async getRuleCount(profileKey: string): Promise<number> {
+        const response = await this.client.get('/api/rules/search', {
+            params: { qprofile: profileKey, activation: true, p: 1, ps: 1 }
+        });
+        const paging = response.data.paging;
+        return paging?.total ?? response.data.total ?? 0;
+    }
+
+    async getRules(profileKey: string, page: number = 1, ps: number = 500): Promise<{ rules: SonarRule[]; total: number }> {
+        const response = await this.client.get('/api/rules/search', {
+            params: {
+                qprofile: profileKey,
+                activation: true,
+                p: page,
+                ps,
+                f: 'name,severity,lang,langName,htmlDesc,tags,status'
+            }
+        });
+        const paging = response.data.paging;
+        return {
+            rules: response.data.rules || [],
+            total: paging?.total ?? response.data.total ?? 0
+        };
+    }
+
+    async getBranchIssues(branchName: string, page: number = 1, ps: number = 50): Promise<IssuesResponse> {
+        const response = await this.client.get('/api/issues/search', {
+            params: {
+                componentKeys: this.config.projectKey,
+                branch: branchName,
+                resolved: false,
+                p: page,
+                ps
+            }
+        });
+        const paging = response.data.paging;
+        return {
+            issues: response.data.issues || [],
+            total: paging?.total   ?? response.data.total ?? 0,
+            p:     paging?.pageIndex ?? response.data.p   ?? page,
+            ps:    paging?.pageSize  ?? response.data.ps  ?? ps
+        };
     }
 }
