@@ -74,9 +74,9 @@ export class SonarQubeApi {
     private config: SonarConfig;
 
     constructor(config: SonarConfig) {
-        this.config = config;
+        this.config = { ...config, uri: config.uri.replace(/\/+$/, '') };
         const axiosConfig: Parameters<typeof axios.create>[0] = {
-            baseURL: config.uri,
+            baseURL: this.config.uri,
             headers: { 'Content-Type': 'application/json' },
             timeout: 30000
         };
@@ -86,6 +86,10 @@ export class SonarQubeApi {
             axiosConfig.auth = { username: config.token, password: '' };
         }
         this.client = axios.create(axiosConfig);
+    }
+
+    get uri(): string {
+        return this.config.uri;
 
         this.client.interceptors.response.use(
             res => res,
@@ -206,10 +210,37 @@ export class SonarQubeApi {
         };
     }
 
+    async getQualityProfileBackup(language: string, qualityProfile: string): Promise<string> {
+        const response = await this.client.get('/api/qualityprofiles/backup', {
+            params: { language, qualityProfile },
+            responseType: 'text',
+            transformResponse: [(d: any) => d]
+        });
+        return response.data as string;
+    }
+
+    async getProjectIssues(page: number = 1, ps: number = 100): Promise<IssuesResponse> {
+        const response = await this.client.get('/api/issues/search', {
+            params: {
+                components: this.config.projectKey,
+                resolved: false,
+                p: page,
+                ps
+            }
+        });
+        const paging = response.data.paging;
+        return {
+            issues: response.data.issues || [],
+            total: paging?.total   ?? response.data.total ?? 0,
+            p:     paging?.pageIndex ?? response.data.p   ?? page,
+            ps:    paging?.pageSize  ?? response.data.ps  ?? ps
+        };
+    }
+
     async getBranchIssues(branchName: string, page: number = 1, ps: number = 50): Promise<IssuesResponse> {
         const response = await this.client.get('/api/issues/search', {
             params: {
-                componentKeys: this.config.projectKey,
+                components: this.config.projectKey,
                 branch: branchName,
                 resolved: false,
                 p: page,

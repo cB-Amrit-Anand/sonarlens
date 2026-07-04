@@ -4,6 +4,37 @@ All notable changes to SonarLens are documented here.
 
 ---
 
+## [1.0.3] - 2026-07-04
+
+### Added
+
+**Local Scan tab**
+- New "Local Scan" tab — run `sonar-scanner` against your working copy directly from the sidebar
+- Sync Rules — pulls org quality profiles + active rules from your SonarQube server, cached locally with a preflight confirmation modal (language/rule-count summary + estimated sync time; nothing runs until you approve)
+- Org Rules viewer — language index page (rule count + Bug/Vulnerability/Code Smell breakdown per language) drilling into a filterable, searchable rule list with severity-colored cards
+- Scan target picker — **Local (private)** or **Server**
+  - **Local**: spins up a private SonarQube Community server in Docker (`sonarlens-local` container) on `127.0.0.1`; code, analysis, and issues never leave the machine. Org quality profiles are auto-imported so local rules match the org's exact rule set
+  - **Server**: analyzes locally but uploads the report to the configured central SonarQube, tagged under the current git branch
+- First-time local setup confirmation modal — shows host/port/username/password (editable, prefilled) and an estimated download/RAM footprint; the Docker container is only created after explicit approval, every time one doesn't already exist
+- **Scan All** (full codebase) and **Scan Changes** (only files changed since the last push, via `git diff`) modes for both local and server targets
+- Stop button — cancels a running scan (kills the scanner process tree) or an in-progress server-side wait, cleanly
+- Live scan timer with an "expected time" estimate learned from your previous scan of the same kind
+- Issue results: 500-per-page pagination, search by file path or message, per-row/select-all checkboxes, Export (JSON/CSV) and Export Selected
+- Reset Local Server action — tears down the local container and its data volume for a clean re-setup if credentials ever get out of sync
+
+### Fixed
+- Double-slash (`//`) in generated SonarQube URLs when the configured host URI had a trailing slash
+- Scanner hanging indefinitely ("Preprocessed 0 files") on JS/TS projects — caused by the file walker crawling `node_modules` before exclusions applied; sources are now restricted to git-tracked top-level entries
+- Scan silently including dependency/build directories and `.git` — exclusions now also honor the project's `.gitignore`
+- SCA dependency analysis and `sonar.qualitygate.wait` (from `sonar-project.properties`) blocking or stalling IDE-triggered scans
+- Corrupted analyzer bundle cache (`.scannerwork/.sonartmp`) left behind by a killed/stopped scan breaking every subsequent run
+- Issues API `400` error on projects with 10,000+ issues (pagination exceeding the API's result-window limit); also switched the deprecated `componentKeys` param to `components`
+- "Changed files" scan picking up scanner artifacts (`.scannerwork/…`) as if they were source changes
+- Local server setup dialog being skipped after the Docker container was deleted, due to a persisted approval flag
+- Misleading "Syncing…" state shown during the (separate) preflight rule-count fetch before the user had confirmed the sync
+
+---
+
 ## [1.0.1] - 2026-06-11
 
 ### Fixed

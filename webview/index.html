@@ -228,12 +228,24 @@ sonar.projectKey=your-project-key</pre>
                     <span id="scan-current-branch" class="badge">detecting…</span>
                 </div>
                 <span class="spacer"></span>
+                <button id="btn-view-rules" class="btn btn-secondary btn-sm hidden">View Rules</button>
                 <button id="btn-sync-rules" class="btn btn-secondary btn-sm">
                     <span class="btn-text">Sync Rules</span>
                     <span class="spinner hidden"></span>
                 </button>
-                <button id="btn-scan-branch" class="btn btn-primary btn-sm" disabled>
-                    <span class="btn-text">&#9654; Scan Branch</span>
+            </div>
+            <div class="tab-toolbar scan-actions-bar">
+                <select id="scan-target" class="filter-input scan-target-select" title="Where analysis runs and results are stored">
+                    <option value="local" selected>&#128274; Local (private)</option>
+                    <option value="server">&#9729; Server</option>
+                </select>
+                <button id="btn-reset-local" class="icon-btn" title="Reset local server (fixes login/password issues — deletes local analysis history only)">&#8635;</button>
+                <span class="spacer"></span>
+                <button id="btn-scan-changed" class="btn btn-secondary btn-sm" disabled title="Scan only files changed since your last push">
+                    <span class="btn-text">Scan Changes</span>
+                </button>
+                <button id="btn-scan-branch" class="btn btn-primary btn-sm" disabled title="Scan the whole codebase">
+                    <span class="btn-text">&#9654; Scan All</span>
                     <span class="spinner hidden"></span>
                 </button>
             </div>
@@ -246,7 +258,9 @@ sonar.projectKey=your-project-key</pre>
                 <div class="scan-progress-header">
                     <span id="scan-progress-spinner" class="spinner" style="width:12px;height:12px;border-width:2px;border-top-color:var(--accent)"></span>
                     <strong id="scan-progress-title">Scanning…</strong>
+                    <span id="scan-timer" class="scan-timer"></span>
                     <span class="spacer"></span>
+                    <button id="btn-stop-scan" class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 7px" title="Stop the scan">&#9632; Stop</button>
                     <button id="btn-copy-log" class="btn btn-secondary btn-sm" style="font-size:10px;padding:2px 7px" title="Copy log">Copy Log</button>
                 </div>
                 <div id="scan-log" class="scan-log"></div>
@@ -272,12 +286,27 @@ sonar.projectKey=your-project-key</pre>
                             <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="INFO"     checked><span class="sev sev-INFO">INFO</span></label>
                         </div>
                     </div>
+                    <span class="spacer"></span>
+                    <button id="scan-btn-export-selected" class="btn btn-secondary btn-sm hidden">Export Selected (<span id="scan-sel-count">0</span>)</button>
+                    <div class="export-wrap">
+                        <button id="scan-btn-export" class="btn btn-secondary btn-sm">Export &#9660;</button>
+                        <div id="scan-export-menu" class="dropdown-menu hidden">
+                            <button data-export="json">Export JSON</button>
+                            <button data-export="csv">Export CSV / Excel</button>
+                        </div>
+                    </div>
                 </div>
-                <input id="scan-file-search" type="text" class="filter-input" placeholder="Filter by file…" />
+                <input id="scan-file-search" type="text" class="filter-input" placeholder="Search by file or message…" />
             </div>
 
             <div id="scan-issues-container">
                 <div class="empty-state">Sync your org rules, then click "Scan Branch" to check your local changes.</div>
+            </div>
+
+            <div id="scan-pagination" class="pagination hidden">
+                <button id="scan-btn-prev" class="btn btn-secondary btn-sm" disabled>&#8592; Prev</button>
+                <span id="scan-page-info" class="page-info">1 / 1</span>
+                <button id="scan-btn-next" class="btn btn-secondary btn-sm">Next &#8594;</button>
             </div>
         </div>
 
@@ -305,6 +334,50 @@ sonar.projectKey=your-project-key</pre>
         <div class="modal-footer">
             <button id="sync-modal-cancel" class="btn btn-secondary btn-sm">Cancel</button>
             <button id="sync-modal-confirm" class="btn btn-primary btn-sm">Sync Now</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     LOCAL SONARQUBE SETUP MODAL
+══════════════════════════════════════ -->
+<div id="local-setup-overlay" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="modal-header">
+            <strong>Set Up Local SonarQube</strong>
+            <button id="local-setup-close" class="icon-btn modal-close-btn">&#10005;</button>
+        </div>
+        <div class="modal-body">
+            <p class="modal-note" style="margin-bottom:10px">
+                Local scanning runs a private SonarQube on your machine (Docker).
+                Your code and issues never leave this computer.
+            </p>
+            <div class="form-group">
+                <label for="local-setup-host">Host</label>
+                <input id="local-setup-host" type="text" value="127.0.0.1" readonly />
+            </div>
+            <div class="form-group">
+                <label for="local-setup-port">Port</label>
+                <input id="local-setup-port" type="number" min="1024" max="65535" value="9876" />
+            </div>
+            <div class="form-group">
+                <label for="local-setup-user">Admin Username</label>
+                <input id="local-setup-user" type="text" value="admin" readonly />
+                <span class="hint">Fixed by the SonarQube image.</span>
+            </div>
+            <div class="form-group">
+                <label for="local-setup-pass">Admin Password</label>
+                <div class="input-with-eye">
+                    <input id="local-setup-pass" type="password" />
+                    <button class="eye-btn icon-btn" data-target="local-setup-pass" title="Show/hide">&#128065;</button>
+                </div>
+                <span class="hint">Min 8 characters. Stored securely in VS Code — used to manage the local server.</span>
+            </div>
+            <div id="local-setup-image-note" class="modal-note"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="local-setup-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+            <button id="local-setup-confirm" class="btn btn-primary btn-sm">Yes, Set Up &amp; Scan</button>
         </div>
     </div>
 </div>

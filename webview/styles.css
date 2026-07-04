@@ -439,11 +439,13 @@ td { padding: 7px 8px; vertical-align: middle; }
 }
 .sev-dropdown-wrap { position: relative; }
 #sev-dropdown-menu,
+#scan-sev-dropdown-menu,
 #stat-dropdown-menu,
 #qg-dropdown-menu { left: 0; right: auto; min-width: 150px; }
 
 /* rows inside filter dropdowns */
 #sev-dropdown-menu .sev-check,
+#scan-sev-dropdown-menu .sev-check,
 #stat-dropdown-menu .sev-check,
 #qg-dropdown-menu .sev-check {
     display: flex;
@@ -454,12 +456,14 @@ td { padding: 7px 8px; vertical-align: middle; }
     font-size: 11px;
 }
 #sev-dropdown-menu .sev-check:hover,
+#scan-sev-dropdown-menu .sev-check:hover,
 #stat-dropdown-menu .sev-check:hover,
 #qg-dropdown-menu .sev-check:hover { background: var(--bg-hover); }
 
 /* inside dropdowns: strip chip background, keep the colour */
 #stat-dropdown-menu .stat,
-#sev-dropdown-menu .sev {
+#sev-dropdown-menu .sev,
+#scan-sev-dropdown-menu .sev {
     background: none;
     padding: 0;
     font-size: 11px;
@@ -674,7 +678,16 @@ td { padding: 7px 8px; vertical-align: middle; }
 .modal {
     background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
     width: min(380px, 92vw); box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    max-height: 80vh; overflow-y: auto;
 }
+.modal-summary { display: flex; gap: 10px; margin-bottom: 12px; }
+.modal-summary-item {
+    flex: 1; background: var(--bg3); border-radius: var(--radius-sm);
+    padding: 10px 8px; text-align: center;
+    display: flex; flex-direction: column; gap: 2px;
+}
+.modal-summary-num { font-size: 18px; font-weight: 700; color: var(--accent); }
+.modal-summary-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; }
 .modal-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 14px 10px; border-bottom: 1px solid var(--border);
@@ -785,3 +798,9 @@ td { padding: 7px 8px; vertical-align: middle; }
 
 /* ── Modal total row ─────────────────────────────────────────────────────── */
 .modal-total-row { font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: right; }
+
+.scan-timer { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ── Scan actions bar ────────────────────────────────────────────────────── */
+.scan-actions-bar { margin-top: -4px; }
+.scan-target-select { height: 26px; width: auto; min-width: 130px; font-size: 11px; }

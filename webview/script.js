@@ -24,9 +24,16 @@ const state = {
     scanIssues:         /** @type {any[]} */ ([]),
     scanBranch:         /** @type {string} */ (''),
     scanDashboardUrl:   /** @type {string} */ (''),
+    scanLocal:          false,
+    scanFiltered:       /** @type {any[]} */ ([]),
+    scanPage:           1,
+    scanPageSize:       500,
+    scanSelectedKeys:   /** @type {Set<string>} */ (new Set()),
     allRules:           /** @type {any[]} */ ([]),
     rulesPage:          1,
-    rulesPageSize:      50
+    rulesPageSize:      50,
+    syncEstimate:       /** @type {string} */ (''),
+    syncRequested:      false
 };
 
 /* ── Page navigation (settings ↔ main) ──────────────────────────────────── */
@@ -122,7 +129,7 @@ document.getElementById('btn-save-config')?.addEventListener('click', () => {
     if (!cfg.token && ssoMode) {
         return showToast('Complete SSO login first — click "Open browser & Login"', 'error');
     }
-    state.sonarUri   = cfg.uri;
+    state.sonarUri   = cfg.uri.replace(/\/+$/, '');
     state.projectKey = cfg.projectKey;
     state.hasAiKey   = !!cfg.aiApiKey;
     vscode.postMessage({ type: 'saveConfig', data: cfg });
@@ -339,17 +346,20 @@ window.addEventListener('message', e => {
         case 'error':           return showToast(msg.message, 'error');
         case 'currentBranch':   return onCurrentBranch(msg.branch);
         case 'syncPreflight':   return onSyncPreflight(msg.profiles, msg.totalRules, msg.estimatedTime);
+        case 'syncPreflightError': return closeSyncModal();
         case 'rulesLoaded':     return onRulesLoaded(msg.syncedAt, msg.ruleCount, msg.profiles, msg.rules);
-        case 'scanStarted':     return onScanStarted(msg.branch);
+        case 'scanStarted':     return onScanStarted(msg.branch, msg.expectedMs);
         case 'scanProgress':    return onScanProgress(msg.message);
-        case 'scanComplete':    return onScanComplete(msg.branch, msg.issues, msg.total, msg.dashboardUrl);
+        case 'scanComplete':    return onScanComplete(msg.branch, msg.issues, msg.total, msg.dashboardUrl, msg.local);
         case 'scanError':       return onScanError(msg.message);
+        case 'scanStopped':     return onScanStopped();
+        case 'localSetupRequired': return onLocalSetupRequired(msg.defaults, msg.scope);
     }
 });
 
 /* ── Config handlers ─────────────────────────────────────────────────────── */
 function onLoadConfig(cfg) {
-    if (cfg.uri)        { setVal('sonar-uri', cfg.uri);           state.sonarUri    = cfg.uri; }
+    if (cfg.uri)        { setVal('sonar-uri', cfg.uri);           state.sonarUri    = cfg.uri.replace(/\/+$/, ''); }
     if (cfg.projectKey) { setVal('project-key', cfg.projectKey);  state.projectKey  = cfg.projectKey; }
     if (cfg.token)      setVal('sonar-token', cfg.token);
     if (cfg.aiApiKey)   { setVal('ai-api-key', cfg.aiApiKey); state.hasAiKey = true; }
@@ -402,21 +412,24 @@ function onLoading(key, active) {
         if (txt) { txt.textContent = active ? 'Testing…' : 'Test'; }
         /** @type {HTMLButtonElement} */(btn).disabled = active;
     }
-    if (key === 'syncRules') {
+    if (key === 'syncRules' || key === 'preflight') {
         const btn = document.getElementById('btn-sync-rules');
         if (!btn) { return; }
         btn.querySelector('.spinner')?.classList.toggle('hidden', !active);
         const txt = btn.querySelector('.btn-text');
-        if (txt) { txt.textContent = active ? 'Syncing…' : 'Sync Rules'; }
+        if (txt) { txt.textContent = active ? (key === 'preflight' ? 'Preparing…' : 'Syncing…') : 'Sync Rules'; }
         /** @type {HTMLButtonElement} */(btn).disabled = active;
     }
     if (key === 'scan') {
         const btn = document.getElementById('btn-scan-branch');
-        if (!btn) { return; }
-        btn.querySelector('.spinner')?.classList.toggle('hidden', !active);
-        const txt = btn.querySelector('.btn-text');
-        if (txt) { txt.textContent = active ? 'Scanning…' : '▶ Scan Branch'; }
-        /** @type {HTMLButtonElement} */(btn).disabled = active;
+        if (btn) {
+            btn.querySelector('.spinner')?.classList.toggle('hidden', !active);
+            const txt = btn.querySelector('.btn-text');
+            if (txt) { txt.textContent = active ? 'Scanning…' : '▶ Scan All'; }
+            /** @type {HTMLButtonElement} */(btn).disabled = active;
+        }
+        const changedBtn = /** @type {HTMLButtonElement} */(document.getElementById('btn-scan-changed'));
+        if (changedBtn) { changedBtn.disabled = active; }
     }
 }
 
@@ -887,9 +900,32 @@ document.getElementById('btn-sync-rules')?.addEventListener('click', () => {
     vscode.postMessage({ type: 'preflightSyncRules' });
 });
 
-/* ── Scan Branch button ──────────────────────────────────────────── */
+/* ── View Rules button (visible once rules are synced) ───────────── */
+document.getElementById('btn-view-rules')?.addEventListener('click', () => {
+    if (state.allRules.length > 0) { openRulesViewer(); }
+});
+
+/* ── Scan buttons (full / changed-only) ──────────────────────────── */
+function scanTarget() {
+    return /** @type {HTMLSelectElement} */(document.getElementById('scan-target'))?.value || 'local';
+}
 document.getElementById('btn-scan-branch')?.addEventListener('click', () => {
-    vscode.postMessage({ type: 'scanBranch' });
+    vscode.postMessage({ type: 'scanBranch', scope: 'full', target: scanTarget() });
+});
+document.getElementById('btn-scan-changed')?.addEventListener('click', () => {
+    vscode.postMessage({ type: 'scanBranch', scope: 'changed', target: scanTarget() });
+});
+document.getElementById('btn-reset-local')?.addEventListener('click', () => {
+    if (confirm('Reset the local SonarQube server? This deletes the local container and its analysis history (org server is unaffected). Next scan sets it up fresh.')) {
+        vscode.postMessage({ type: 'resetLocalServer' });
+    }
+});
+
+/* ── Stop scan button ────────────────────────────────────────────── */
+document.getElementById('btn-stop-scan')?.addEventListener('click', () => {
+    const btn = /** @type {HTMLButtonElement} */(document.getElementById('btn-stop-scan'));
+    if (btn) { btn.disabled = true; btn.textContent = 'Stopping…'; }
+    vscode.postMessage({ type: 'stopScan' });
 });
 
 /* ── Copy log button ─────────────────────────────────────────────── */
@@ -921,14 +957,69 @@ function updateScanSevDropdownLabel() {
     }
 }
 
-/* ── Scan file filter ────────────────────────────────────────────── */
-document.getElementById('scan-file-search')?.addEventListener('input', () => renderScanIssues());
+/* ── Scan file/message search ────────────────────────────────────── */
+document.getElementById('scan-file-search')?.addEventListener('input', () => {
+    state.scanPage = 1;
+    renderScanIssues();
+});
+
+/* ── Scan pagination ─────────────────────────────────────────────── */
+document.getElementById('scan-btn-prev')?.addEventListener('click', () => {
+    if (state.scanPage > 1) { state.scanPage--; renderScanIssues(); }
+});
+document.getElementById('scan-btn-next')?.addEventListener('click', () => {
+    state.scanPage++;
+    renderScanIssues();
+});
+
+/* ── Scan export dropdown ────────────────────────────────────────── */
+document.getElementById('scan-btn-export')?.addEventListener('click', e => {
+    e.stopPropagation();
+    document.getElementById('scan-export-menu')?.classList.toggle('hidden');
+});
+document.addEventListener('click', e => {
+    if (!/** @type {HTMLElement} */(e.target).closest('.export-wrap')) {
+        document.getElementById('scan-export-menu')?.classList.add('hidden');
+    }
+});
+document.getElementById('scan-export-menu')?.addEventListener('click', e => {
+    const btn = /** @type {HTMLElement} */(e.target).closest('[data-export]');
+    if (!btn) { return; }
+    document.getElementById('scan-export-menu')?.classList.add('hidden');
+    exportScanIssues(/** @type {HTMLElement} */(btn).dataset.export || '', state.scanFiltered);
+});
+document.getElementById('scan-btn-export-selected')?.addEventListener('click', () => {
+    const issues = state.scanIssues.filter(i => state.scanSelectedKeys.has(i.key));
+    if (!issues.length) { return; }
+    exportScanIssues('csv', issues);
+});
 
 /* ── Scan issues container delegation ───────────────────────────── */
 document.getElementById('scan-issues-container')?.addEventListener('click', e => {
-    const btn = /** @type {HTMLElement} */(e.target).closest('[data-action="openScanIssue"]');
-    if (btn) {
-        vscode.postMessage({ type: 'openUrl', url: /** @type {HTMLElement} */(btn).dataset.url });
+    const target    = /** @type {HTMLElement} */(e.target);
+    const openBtn   = target.closest('[data-action="openScanIssue"]');
+    const checkbox  = target.closest('[data-action="selectScan"]');
+    const selectAll = target.closest('#select-all-scan-issues');
+
+    if (openBtn) {
+        vscode.postMessage({ type: 'openUrl', url: /** @type {HTMLElement} */(openBtn).dataset.url });
+        return;
+    }
+    if (checkbox) {
+        const key = /** @type {HTMLElement} */(checkbox).dataset.issueKey || '';
+        /** @type {HTMLInputElement} */(checkbox).checked
+            ? state.scanSelectedKeys.add(key)
+            : state.scanSelectedKeys.delete(key);
+        updateScanSelectionUI();
+        return;
+    }
+    if (selectAll) {
+        const checked = /** @type {HTMLInputElement} */(selectAll).checked;
+        state.scanFiltered.forEach(i => {
+            checked ? state.scanSelectedKeys.add(i.key) : state.scanSelectedKeys.delete(i.key);
+        });
+        renderScanIssues();
+        updateScanSelectionUI();
     }
 });
 document.getElementById('scan-results-summary')?.addEventListener('click', e => {
@@ -939,6 +1030,37 @@ document.getElementById('scan-results-summary')?.addEventListener('click', e => 
     }
 });
 
+function updateScanSelectionUI() {
+    const count = state.scanSelectedKeys.size;
+    const btn   = document.getElementById('scan-btn-export-selected');
+    const span  = document.getElementById('scan-sel-count');
+    btn?.classList.toggle('hidden', count === 0);
+    if (span) { span.textContent = String(count); }
+}
+
+/** @param {string} format @param {any[]} issues */
+function exportScanIssues(format, issues) {
+    let content = '', filename = '';
+    if (format === 'json') {
+        content = JSON.stringify(issues.map(i => ({
+            key: i.key,
+            file: i.component.includes(':') ? i.component.split(':').slice(1).join(':') : i.component,
+            line: i.textRange?.startLine ?? i.line ?? null,
+            severity: i.severity, type: i.type, rule: i.rule, message: i.message, status: i.status
+        })), null, 2);
+        filename = 'sonar-scan-issues.json';
+    } else {
+        const rows = [['Key', 'File', 'Line', 'Severity', 'Type', 'Rule', 'Message', 'Status']];
+        issues.forEach(i => {
+            const f = i.component.includes(':') ? i.component.split(':').slice(1).join(':') : i.component;
+            rows.push([i.key, f, String(i.textRange?.startLine ?? i.line ?? ''), i.severity, i.type || '', i.rule, `"${(i.message || '').replaceAll('"', '""')}"`, i.status]);
+        });
+        content = rows.map(r => r.join(',')).join('\n');
+        filename = 'sonar-scan-issues.csv';
+    }
+    vscode.postMessage({ type: 'export', format, content, filename });
+}
+
 /* ── Message handlers ────────────────────────────────────────────── */
 function onCurrentBranch(branch) {
     state.scanBranch = branch;
@@ -946,28 +1068,26 @@ function onCurrentBranch(branch) {
     if (el) { el.textContent = branch; }
     const scanBtn = /** @type {HTMLButtonElement} */(document.getElementById('btn-scan-branch'));
     if (scanBtn) { scanBtn.disabled = false; }
+    const changedBtn = /** @type {HTMLButtonElement} */(document.getElementById('btn-scan-changed'));
+    if (changedBtn) { changedBtn.disabled = false; }
 }
 
 function onSyncPreflight(profiles, totalRules, estimatedTime) {
     const profilesEl = document.getElementById('sync-modal-profiles');
     const timeEl     = document.getElementById('sync-modal-time');
     if (profilesEl) {
-        profilesEl.innerHTML = profiles.map(/** @param {any} p */ p =>
-            `<div class="modal-profile-row">
-                <span class="modal-profile-name">${esc(p.name)}</span>
-                <span class="modal-profile-lang">${esc(p.languageName || p.language)}</span>
-                <span class="modal-profile-count">${p.ruleCount} rules</span>
-            </div>`
-        ).join('') + `<div class="modal-total-row">Total: <strong>${totalRules}</strong> rules</div>`;
+        const langCount = new Set(profiles.map(/** @param {any} p */ p => p.language)).size;
+        profilesEl.innerHTML = `<div class="modal-summary">
+            <div class="modal-summary-item"><span class="modal-summary-num">${langCount}</span><span class="modal-summary-label">languages</span></div>
+            <div class="modal-summary-item"><span class="modal-summary-num">${totalRules}</span><span class="modal-summary-label">active rules</span></div>
+        </div>`;
     }
     if (timeEl) { timeEl.textContent = estimatedTime; }
+    state.syncEstimate = estimatedTime || '';
     document.getElementById('sync-modal-time-row')?.classList.remove('hidden');
     const confirmBtn = /** @type {HTMLButtonElement} */(document.getElementById('sync-modal-confirm'));
     if (confirmBtn) { confirmBtn.disabled = false; }
 }
-
-/** @type {boolean} */
-let _rulesFirstLoad = true;
 
 function onRulesLoaded(syncedAt, ruleCount, profiles, rules) {
     if (/** @type {any} */(window).__syncTimer) { clearInterval(/** @type {any} */(window).__syncTimer); /** @type {any} */(window).__syncTimer = null; }
@@ -978,25 +1098,47 @@ function onRulesLoaded(syncedAt, ruleCount, profiles, rules) {
     const date  = syncedAt ? new Date(syncedAt).toLocaleString() : 'unknown';
     const langs = profiles ? profiles.map(/** @param {any} p */ p => p.languageName || p.language).join(', ') : '';
     if (info) {
-        info.innerHTML = `✔ <strong>${ruleCount}</strong> rules synced (${esc(langs)}) — last synced ${esc(date)}
-            &nbsp;<a href="#" id="rules-view-link" style="color:var(--accent);font-size:11px">View rules ›</a>`;
-        document.getElementById('rules-view-link')?.addEventListener('click', e => {
-            e.preventDefault();
-            openRulesViewer();
-        });
+        info.innerHTML = `✔ <strong>${ruleCount}</strong> rules synced (${esc(langs)}) — last synced ${esc(date)}`;
     }
 
     if (rules && rules.length > 0) {
         state.allRules = rules;
         populateLangFilter(rules);
-        // Redirect to rules viewer only when triggered by a fresh sync (not on page restore)
-        if (!_rulesFirstLoad) { openRulesViewer(); }
+        document.getElementById('btn-view-rules')?.classList.remove('hidden');
+        // Redirect to the language index only when triggered by a fresh user sync
+        // (not when the cached rules are restored on webview load)
+        if (state.syncRequested) { openRulesViewer(); }
     }
-    _rulesFirstLoad = false;
+    state.syncRequested = false;
 }
 
-function onScanStarted(branch) {
+/* ── Scan elapsed timer ──────────────────────────────────────────── */
+let _scanTimerInt = null;
+
+function fmtDur(ms) {
+    const s = Math.round(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+function startScanTimer(expectedMs) {
+    stopScanTimer();
+    const el = document.getElementById('scan-timer');
+    const startTs = Date.now();
+    const expected = expectedMs ? ` / expected ~${fmtDur(expectedMs)}` : '';
+    const tick = () => { if (el) { el.textContent = `${fmtDur(Date.now() - startTs)}${expected}`; } };
+    tick();
+    _scanTimerInt = setInterval(tick, 1000);
+}
+
+function stopScanTimer() {
+    if (_scanTimerInt) { clearInterval(_scanTimerInt); _scanTimerInt = null; }
+}
+
+function onScanStarted(branch, expectedMs) {
     state.scanBranch = branch;
+    state.scanPage = 1;
+    state.scanSelectedKeys.clear();
+    startScanTimer(expectedMs);
     document.getElementById('scan-progress-box')?.classList.remove('hidden');
     document.getElementById('scan-results-summary')?.classList.add('hidden');
     document.getElementById('scan-issue-filters')?.classList.add('hidden');
@@ -1005,10 +1147,68 @@ function onScanStarted(branch) {
     const title   = document.getElementById('scan-progress-title');
     if (spinner) { spinner.classList.remove('hidden'); }
     if (title)   { title.textContent = 'Scanning…'; title.style.color = ''; }
+    setStopScanBtn('visible');
     const log = document.getElementById('scan-log');
     if (log) { log.innerHTML = ''; }
     const container = document.getElementById('scan-issues-container');
     if (container) { container.innerHTML = '<div class="empty-state">Scanning…</div>'; }
+}
+
+/** @param {'visible'|'hidden'} mode */
+function setStopScanBtn(mode) {
+    const btn = /** @type {HTMLButtonElement} */(document.getElementById('btn-stop-scan'));
+    if (!btn) { return; }
+    btn.classList.toggle('hidden', mode !== 'visible');
+    btn.disabled = false;
+    btn.innerHTML = '&#9632; Stop';
+}
+
+/* ── Local SonarQube setup modal ─────────────────────────────────── */
+/** @type {'full'|'changed'} */
+let _localSetupScope = 'full';
+
+function onLocalSetupRequired(defaults, scope) {
+    _localSetupScope = scope === 'changed' ? 'changed' : 'full';
+    setVal('local-setup-host', defaults?.host || '127.0.0.1');
+    setVal('local-setup-port', String(defaults?.port || 9876));
+    setVal('local-setup-user', defaults?.username || 'admin');
+    setVal('local-setup-pass', defaults?.password || '');
+    const note = document.getElementById('local-setup-image-note');
+    if (note) { note.textContent = `Image: ${defaults?.image || 'sonarqube:community'}`; }
+    document.getElementById('local-setup-overlay')?.classList.remove('hidden');
+}
+
+function closeLocalSetupModal() {
+    document.getElementById('local-setup-overlay')?.classList.add('hidden');
+}
+
+document.getElementById('local-setup-close')?.addEventListener('click', closeLocalSetupModal);
+document.getElementById('local-setup-cancel')?.addEventListener('click', closeLocalSetupModal);
+document.getElementById('local-setup-overlay')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('local-setup-overlay')) { closeLocalSetupModal(); }
+});
+document.getElementById('local-setup-confirm')?.addEventListener('click', () => {
+    const port = Number(val('local-setup-port'));
+    const password = val('local-setup-pass');
+    if (!port || port < 1024 || port > 65535) {
+        return showToast('Enter a valid port (1024–65535)', 'error');
+    }
+    if (!password || password.length < 8) {
+        return showToast('Admin password must be at least 8 characters', 'error');
+    }
+    closeLocalSetupModal();
+    vscode.postMessage({ type: 'confirmLocalSetup', port, password, scope: _localSetupScope });
+});
+
+function onScanStopped() {
+    const spinner = document.getElementById('scan-progress-spinner');
+    const title   = document.getElementById('scan-progress-title');
+    if (spinner) { spinner.classList.add('hidden'); }
+    if (title)   { title.textContent = 'Scan stopped'; title.style.color = 'var(--warning)'; }
+    stopScanTimer();
+    setStopScanBtn('hidden');
+    const container = document.getElementById('scan-issues-container');
+    if (container) { container.innerHTML = '<div class="empty-state">Scan stopped. Click "Scan Branch" to start again.</div>'; }
 }
 
 function onScanProgress(message) {
@@ -1021,15 +1221,18 @@ function onScanProgress(message) {
     log.scrollTop = log.scrollHeight;
 }
 
-function onScanComplete(branch, issues, total, dashboardUrl) {
+function onScanComplete(branch, issues, total, dashboardUrl, isLocal) {
     // Keep log visible but update header to show done
     const spinner = document.getElementById('scan-progress-spinner');
     const title   = document.getElementById('scan-progress-title');
     if (spinner) { spinner.classList.add('hidden'); }
-    if (title)   { title.textContent = 'Scan complete'; title.style.color = 'var(--success)'; }
+    if (title)   { title.textContent = isLocal ? 'Scan complete (local)' : 'Scan complete'; title.style.color = 'var(--success)'; }
+    stopScanTimer();
+    setStopScanBtn('hidden');
 
     state.scanIssues     = issues || [];
     state.scanDashboardUrl = dashboardUrl || '';
+    state.scanLocal      = !!isLocal;
 
     const summary = document.getElementById('scan-results-summary');
     const resultText = document.getElementById('scan-result-text');
@@ -1067,6 +1270,8 @@ function onScanError(message) {
     const title   = document.getElementById('scan-progress-title');
     if (spinner) { spinner.classList.add('hidden'); }
     if (title)   { title.textContent = 'Scan failed'; title.style.color = 'var(--error)'; }
+    stopScanTimer();
+    setStopScanBtn('hidden');
 
     const errBox = document.getElementById('scan-error-box');
     if (errBox) {
@@ -1113,37 +1318,60 @@ function onScanError(message) {
 }
 
 function renderScanIssues() {
-    const container = document.getElementById('scan-issues-container');
+    const container  = document.getElementById('scan-issues-container');
+    const pagination = document.getElementById('scan-pagination');
     if (!container) { return; }
 
     const activeSevs = new Set(
         [...document.querySelectorAll('.scan-sev-filter:checked')]
             .map(el => /** @type {HTMLInputElement} */(el).value)
     );
-    const fileQ = (/** @type {HTMLInputElement} */(document.getElementById('scan-file-search'))?.value || '').toLowerCase().trim();
+    const q = (/** @type {HTMLInputElement} */(document.getElementById('scan-file-search'))?.value || '').toLowerCase().trim();
 
     const filtered = state.scanIssues.filter(issue => {
         if (!activeSevs.has(issue.severity)) { return false; }
-        if (fileQ) {
+        if (q) {
             const file = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
-            if (!file.toLowerCase().includes(fileQ)) { return false; }
+            const haystack = `${file} ${issue.message || ''}`.toLowerCase();
+            if (!haystack.includes(q)) { return false; }
         }
         return true;
     });
+    state.scanFiltered = filtered;
 
     if (filtered.length === 0) {
         container.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
+        pagination?.classList.add('hidden');
         return;
     }
 
-    const rows = filtered.map((issue, idx) => {
+    const totalPages = Math.ceil(filtered.length / state.scanPageSize);
+    if (state.scanPage > totalPages) { state.scanPage = totalPages; }
+    if (state.scanPage < 1) { state.scanPage = 1; }
+    const pageOffset = (state.scanPage - 1) * state.scanPageSize;
+    const pageIssues = filtered.slice(pageOffset, pageOffset + state.scanPageSize);
+
+    // Local scans link to the local container UI (no branch param — local
+    // analysis is unbranched); server scans link to the central server.
+    const localBase = state.scanLocal && state.scanDashboardUrl
+        ? state.scanDashboardUrl.split('/dashboard')[0] : '';
+
+    const allSelected = pageIssues.every(i => state.scanSelectedKeys.has(i.key));
+
+    const rows = pageIssues.map((issue, idx) => {
         const filePath = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
         const line     = issue.textRange?.startLine ?? issue.line ?? '—';
-        const issueUrl = state.sonarUri && state.projectKey
-            ? `${state.sonarUri}/project/issues?id=${encodeURIComponent(state.projectKey)}&issues=${encodeURIComponent(issue.key)}&open=${encodeURIComponent(issue.key)}&branch=${encodeURIComponent(state.scanBranch)}`
-            : '';
-        return `<tr>
-            <td class="cell-sr">${idx + 1}</td>
+        const projectId = issue.project || state.projectKey;
+        const selected = state.scanSelectedKeys.has(issue.key);
+        let issueUrl = '';
+        if (state.scanLocal && localBase) {
+            issueUrl = `${localBase}/project/issues?id=${encodeURIComponent(projectId)}&issues=${encodeURIComponent(issue.key)}&open=${encodeURIComponent(issue.key)}`;
+        } else if (state.sonarUri && state.projectKey) {
+            issueUrl = `${state.sonarUri}/project/issues?id=${encodeURIComponent(state.projectKey)}&issues=${encodeURIComponent(issue.key)}&open=${encodeURIComponent(issue.key)}&branch=${encodeURIComponent(state.scanBranch)}`;
+        }
+        return `<tr class="${selected ? 'row-selected' : ''}">
+            <td><input type="checkbox" class="row-check" data-action="selectScan" data-issue-key="${esc(issue.key)}" ${selected ? 'checked' : ''}></td>
+            <td class="cell-sr">${pageOffset + idx + 1}</td>
             <td><span class="sev sev-${issue.severity}">${issue.severity}</span></td>
             <td class="msg-cell">
                 <span class="cell-msg">${issueUrl
@@ -1158,14 +1386,17 @@ function renderScanIssues() {
 
     const filterNote = filtered.length < state.scanIssues.length
         ? ` (${filtered.length} shown after filters)` : '';
+    const from = pageOffset + 1;
+    const to   = Math.min(pageOffset + state.scanPageSize, filtered.length);
 
     container.innerHTML = `
-        <div class=”issues-summary”>${state.scanIssues.length} issue(s) on branch “${esc(state.scanBranch)}”${filterNote}</div>
-        <div class=”table-wrapper”>
+        <div class="issues-summary">Showing ${from}–${to} of ${filtered.length} issue(s) on branch “${esc(state.scanBranch)}”${filterNote}</div>
+        <div class="table-wrapper">
             <table>
                 <thead>
                     <tr>
-                        <th class=”cell-sr”>#</th>
+                        <th><input type="checkbox" id="select-all-scan-issues" ${allSelected ? 'checked' : ''}></th>
+                        <th class="cell-sr">#</th>
                         <th>Sev</th>
                         <th>Message / File</th>
                         <th>Status</th>
@@ -1175,6 +1406,15 @@ function renderScanIssues() {
                 <tbody>${rows}</tbody>
             </table>
         </div>`;
+
+    const pageInfo = document.getElementById('scan-page-info');
+    const btnPrev  = /** @type {HTMLButtonElement} */(document.getElementById('scan-btn-prev'));
+    const btnNext  = /** @type {HTMLButtonElement} */(document.getElementById('scan-btn-next'));
+    if (pageInfo) { pageInfo.textContent = `${state.scanPage} / ${totalPages}`; }
+    if (btnPrev)  { btnPrev.disabled = state.scanPage <= 1; }
+    if (btnNext)  { btnNext.disabled = state.scanPage >= totalPages; }
+    pagination?.classList.toggle('hidden', totalPages <= 1);
+    updateScanSelectionUI();
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1188,16 +1428,19 @@ document.getElementById('sync-modal-overlay')?.addEventListener('click', e => {
 });
 document.getElementById('sync-modal-confirm')?.addEventListener('click', () => {
     closeSyncModal();
+    state.syncRequested = true;
     const bar  = document.getElementById('scan-rules-status');
     const info = document.getElementById('scan-rules-info');
     if (bar)  { bar.classList.remove('hidden'); }
-    // Show elapsed timer while syncing
+    // Show elapsed timer + estimate while syncing
+    const est = state.syncEstimate ? ` <span style="color:var(--text-muted)">(estimated: ${esc(state.syncEstimate)})</span>` : '';
+    const syncLine = s => `<span class="spinner" style="width:11px;height:11px;border-width:2px;border-top-color:var(--accent);display:inline-block;vertical-align:middle;margin-right:6px"></span> Syncing rules… ${s}s${est}`;
     let elapsed = 0;
     const syncTimer = setInterval(() => {
         elapsed++;
-        if (info) { info.innerHTML = `<span class="spinner" style="width:11px;height:11px;border-width:2px;border-top-color:var(--accent);display:inline-block;vertical-align:middle;margin-right:6px"></span> Syncing rules… ${elapsed}s`; }
+        if (info) { info.innerHTML = syncLine(elapsed); }
     }, 1000);
-    if (info) { info.innerHTML = `<span class="spinner" style="width:11px;height:11px;border-width:2px;border-top-color:var(--accent);display:inline-block;vertical-align:middle;margin-right:6px"></span> Syncing rules… 0s`; }
+    if (info) { info.innerHTML = syncLine(0); }
     // Store timer id so rulesLoaded can clear it
     /** @type {any} */(window).__syncTimer = syncTimer;
     vscode.postMessage({ type: 'syncRules' });
@@ -1329,7 +1572,7 @@ function populateLangFilter(rules) {
         .sort((a, b) => a[1].localeCompare(b[1]));
     const sel = document.getElementById('rules-filter-lang');
     if (!sel) { return; }
-    sel.innerHTML = '<option value=””>All Languages</option>';
+    sel.innerHTML = '<option value="">All Languages</option>';
     for (const [lang, langName] of langs) {
         const opt = document.createElement('option');
         opt.value = lang;
@@ -1371,7 +1614,7 @@ function renderRules() {
     if (badge) { badge.textContent = `${filtered.length} rules`; }
 
     if (filtered.length === 0) {
-        container.innerHTML = '<div class=”empty-state”>No rules match the current filters.</div>';
+        container.innerHTML = '<div class="empty-state">No rules match the current filters.</div>';
         pagination?.classList.add('hidden');
         return;
     }
@@ -1397,10 +1640,10 @@ function renderRules() {
             const typeLabel = TYPE_LABELS[type] || type;
             const typeCls   = TYPE_CLASS[type]  || 'type-other';
             const rows = rules.map(r => ruleCardHtml(r)).join('');
-            return `<div class=”rules-category”>
-                <div class=”rules-category-header”>
-                    <span class=”rule-type-badge ${typeCls}”>${esc(typeLabel)}</span>
-                    <span class=”rules-category-count”>${rules.length} rules</span>
+            return `<div class="rules-category">
+                <div class="rules-category-header">
+                    <span class="rule-type-badge ${typeCls}">${esc(typeLabel)}</span>
+                    <span class="rules-category-count">${rules.length} rules</span>
                 </div>
                 ${rows}
             </div>`;
@@ -1434,17 +1677,17 @@ function ruleCardHtml(r) {
     const ruleUrl = state.sonarUri
         ? `${state.sonarUri}/coding_rules?rule_key=${encodeURIComponent(r.key)}`
         : '';
-    return `<div class=”rule-card rule-sev-${sev}” data-rule-url=”${esc(ruleUrl)}” title=”Click to open rule in SonarQube”>
-        <div class=”rule-card-header”>
-            <span class=”rule-card-name”>${esc(r.name)}</span>
-            <span class=”rule-card-badges”>
-                <span class=”sev sev-${sev}”>${sev}</span>
-                <span class=”rule-type-badge ${typeCls}”>${esc(typeLabel)}</span>
-                <span class=”rule-lang-badge”>${esc(r.langName || r.lang)}</span>
+    return `<div class="rule-card rule-sev-${sev}" data-rule-url="${esc(ruleUrl)}" title="Click to open rule in SonarQube">
+        <div class="rule-card-header">
+            <span class="rule-card-name">${esc(r.name)}</span>
+            <span class="rule-card-badges">
+                <span class="sev sev-${sev}">${sev}</span>
+                <span class="rule-type-badge ${typeCls}">${esc(typeLabel)}</span>
+                <span class="rule-lang-badge">${esc(r.langName || r.lang)}</span>
             </span>
         </div>
-        <div class=”rule-card-key”>${esc(r.key)}</div>
-        ${desc ? `<div class=”rule-card-desc”>${esc(desc)}${r.htmlDesc && r.htmlDesc.replace(/<[^>]+>/g,'').trim().length > 200 ? '…' : ''}</div>` : ''}
-        ${ruleUrl ? `<div class=”rule-card-link”>Open in SonarQube ↗</div>` : ''}
+        <div class="rule-card-key">${esc(r.key)}</div>
+        ${desc ? `<div class="rule-card-desc">${esc(desc)}${r.htmlDesc && r.htmlDesc.replace(/<[^>]+>/g,'').trim().length > 200 ? '…' : ''}</div>` : ''}
+        ${ruleUrl ? `<div class="rule-card-link">Open in SonarQube ↗</div>` : ''}
     </div>`;
 }

@@ -1,5 +1,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const execAsync = promisify(exec);
 
@@ -20,6 +22,38 @@ export async function getCurrentBranch(cwd: string): Promise<string | undefined>
     } catch {
         return undefined;
     }
+}
+
+/**
+ * Files changed since the last push: commits not yet pushed, plus
+ * staged/unstaged edits, plus untracked files.
+ */
+export async function getChangedFiles(cwd: string): Promise<string[]> {
+    const files = new Set<string>();
+    const collect = async (cmd: string): Promise<boolean> => {
+        try {
+            const { stdout } = await execAsync(cmd, { cwd, maxBuffer: 10 * 1024 * 1024 });
+            stdout.split('\n').map(l => l.trim()).filter(Boolean).forEach(f => files.add(f));
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    // Committed but not pushed — try push target, then upstream, then origin default branch
+    (await collect('git diff --name-only @{push}...HEAD')) ||
+    (await collect('git diff --name-only @{upstream}...HEAD')) ||
+    (await collect('git diff --name-only origin/HEAD...HEAD'));
+
+    await collect('git diff --name-only HEAD');                 // staged + unstaged
+    await collect('git ls-files --others --exclude-standard');  // untracked
+
+    // Drop scanner artifacts (often not gitignored), OS junk, and files that
+    // no longer exist (deleted in the diff) — none of them are scannable code.
+    const junk = /^(\.scannerwork|\.sonartmp)(\/|$)|(^|\/)\.DS_Store$/;
+    return [...files].filter(f =>
+        !junk.test(f) && fs.existsSync(path.join(cwd, f))
+    );
 }
 
 export async function stageFile(filePath: string, cwd: string): Promise<void> {

@@ -9,8 +9,14 @@ import {
     resolveFilePath, readFileContent, extractCodeSnippet,
     applyLineFix, writeFile, openDiffView, getWorkspaceRoot, readSonarProperties
 } from '../utils/fileUtils';
-import { commitFix, isGitRepo, getCurrentBranch } from '../utils/gitUtils';
-import { runSonarScanner, pollCeTask } from '../utils/scannerUtils';
+import * as crypto from 'crypto';
+import { commitFix, isGitRepo, getCurrentBranch, getChangedFiles } from '../utils/gitUtils';
+import { runSonarScanner, pollCeTask, stopSonarScanner } from '../utils/scannerUtils';
+import {
+    DEFAULT_LOCAL_PORT, DOCKER_NOT_INSTALLED_MSG, DOCKER_NOT_RUNNING_MSG, ProfileBackup,
+    localUrlFor, dockerState, containerState, startLocalSonar, waitForLocalSonarUp,
+    ensureLocalAuth, restoreQualityProfiles, ensureLocalProject, resetLocalSonar
+} from '../utils/localSonarUtils';
 
 interface SaveConfigPayload extends SonarConfig { aiApiKey: string; tokenType: 'basic' | 'bearer'; }
 
@@ -92,7 +98,13 @@ export abstract class SonarQubeBaseProvider {
             case 'openUrl':        return this.handleOpenUrl(message.url);
             case 'preflightSyncRules': return this.handlePreflightSyncRules();
             case 'syncRules':      return this.handleSyncRules();
-            case 'scanBranch':     return this.handleScanBranch();
+            case 'scanBranch':     return this.handleScanBranch(
+                message.scope === 'changed' ? 'changed' : 'full',
+                message.target === 'server' ? 'server' : 'local'
+            );
+            case 'stopScan':       return this.handleStopScan();
+            case 'confirmLocalSetup': return this.handleConfirmLocalSetup(message.port, message.password, message.scope);
+            case 'resetLocalServer': return this.handleResetLocalServer();
             case 'loadScanState':  return this.handleLoadScanState();
         }
     }
@@ -394,10 +406,11 @@ export abstract class SonarQubeBaseProvider {
 
     protected async handlePreflightSyncRules(): Promise<void> {
         if (!this.sonarApi) { return this.toast('Save configuration first', 'error'); }
-        this.post({ type: 'loading', key: 'syncRules', value: true });
+        this.post({ type: 'loading', key: 'preflight', value: true });
         try {
             const profiles = await this.sonarApi.getQualityProfiles();
             if (profiles.length === 0) {
+                this.post({ type: 'syncPreflightError' });
                 return this.toast('No quality profiles found for this project', 'warning');
             }
             // Fetch rule counts per profile in parallel
@@ -418,9 +431,10 @@ export abstract class SonarQubeBaseProvider {
                 estimatedTime: estimatedDisplay
             });
         } catch (err: any) {
+            this.post({ type: 'syncPreflightError' });
             this.toast(`Failed to fetch profile info: ${err.message}`, 'error');
         } finally {
-            this.post({ type: 'loading', key: 'syncRules', value: false });
+            this.post({ type: 'loading', key: 'preflight', value: false });
         }
     }
 
@@ -451,6 +465,19 @@ export abstract class SonarQubeBaseProvider {
             };
             await this.context.globalState.update('sonarRulesCache', cache);
 
+            // Also download each profile's backup XML — used to replicate the
+            // org rule set inside the local Docker SonarQube for local scans.
+            const backups: ProfileBackup[] = [];
+            for (const profile of profiles) {
+                try {
+                    const xml = await this.sonarApi.getQualityProfileBackup(profile.language, profile.name);
+                    backups.push({ language: profile.language, name: profile.name, xml });
+                } catch { /* non-fatal — local scan falls back to default rules for this language */ }
+            }
+            this.writeProfileBackups(backups);
+            // Force re-import into the local container on next local scan
+            await this.context.globalState.update('localProfilesHash', undefined);
+
             this.post({
                 type: 'rulesLoaded',
                 syncedAt: cache.syncedAt,
@@ -466,88 +493,371 @@ export abstract class SonarQubeBaseProvider {
         }
     }
 
-    protected async handleScanBranch(): Promise<void> {
-        if (!this.sonarApi) { return this.toast('Save configuration first', 'error'); }
+    private scanCancelRequested = false;
+    private scanCompletedOk = false;
+    /** Set only by the setup-confirmation flow, consumed once by the very next runLocalScan() */
+    private localSetupApprovedOnce = false;
+
+    protected handleStopScan(): void {
+        this.scanCancelRequested = true;
+        stopSonarScanner();
+        this.post({ type: 'scanProgress', message: 'Stop requested — terminating scan…' });
+    }
+
+    /* ── Profile backup persistence (globalStorage file — XMLs are too big for globalState) ── */
+
+    private profileBackupsPath(): string {
+        return path.join(this.context.globalStorageUri.fsPath, 'profile-backups.json');
+    }
+
+    protected writeProfileBackups(backups: ProfileBackup[]): void {
+        try {
+            fs.mkdirSync(this.context.globalStorageUri.fsPath, { recursive: true });
+            fs.writeFileSync(this.profileBackupsPath(), JSON.stringify(backups));
+        } catch { /* non-fatal */ }
+    }
+
+    protected readProfileBackups(): ProfileBackup[] | null {
+        try {
+            const raw = fs.readFileSync(this.profileBackupsPath(), 'utf-8');
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+        } catch {
+            return null;
+        }
+    }
+
+    protected async handleScanBranch(scope: 'full' | 'changed' = 'full', target: 'local' | 'server' = 'local'): Promise<void> {
+        this.scanCancelRequested = false;
 
         const root = getWorkspaceRoot();
         if (!root) { return this.toast('No workspace folder open', 'error'); }
 
-        const branch = await getCurrentBranch(root);
-        if (!branch) { return this.toast('Could not determine current git branch', 'error'); }
+        const branch = await getCurrentBranch(root) || 'local';
 
-        const cache = this.context.globalState.get<StoredRulesCache>('sonarRulesCache');
-        if (!cache) { return this.toast('Sync rules first before scanning', 'warning'); }
+        // Expected duration = how long the same kind of scan took last time
+        const durationKey = `scanDuration:${target}:${scope}`;
+        const expectedMs = this.context.globalState.get<number>(durationKey);
+        const startedAt = Date.now();
+        this.scanCompletedOk = false;
 
-        this.post({ type: 'scanStarted', branch });
+        this.post({ type: 'scanStarted', branch, expectedMs });
         this.post({ type: 'loading', key: 'scan', value: true });
 
+        const progress = (message: string) => this.post({ type: 'scanProgress', message });
+
         try {
-            this.post({ type: 'scanProgress', message: `Running sonar-scanner on branch: ${branch}` });
-
-            const scanResult = await runSonarScanner(root, branch, (line) => {
-                // Forward meaningful sonar-scanner output lines
-                if (line.includes('ERROR') || line.includes('WARN') || line.includes('INFO')) {
-                    this.post({ type: 'scanProgress', message: line.trim() });
+            // Changed-only scope: resolve the file list up front (shared by both targets)
+            let inclusions: string[] | undefined;
+            if (scope === 'changed') {
+                inclusions = await getChangedFiles(root);
+                if (inclusions.length === 0) {
+                    this.post({ type: 'scanStopped' });
+                    this.toast('No changed files since last push — nothing to scan', 'info');
+                    return;
                 }
-            });
-
-            if (!scanResult.success) {
-                this.post({ type: 'scanError', message: scanResult.output });
-                this.toast('sonar-scanner failed — check the scan log', 'error');
-                return;
+                progress(`Changed-files scan: ${inclusions.length} file(s) since last push`);
+                progress(`Files: ${inclusions.slice(0, 15).join(', ')}${inclusions.length > 15 ? ` … +${inclusions.length - 15} more` : ''}`);
             }
 
-            if (!scanResult.ceTaskUrl) {
-                this.post({ type: 'scanError', message: 'sonar-scanner completed but report-task.txt not found. Check sonar-project.properties.' });
-                return;
+            if (target === 'local') {
+                await this.runLocalScan(root, branch, inclusions, progress, scope);
+            } else {
+                await this.runServerScan(root, branch, inclusions, progress);
             }
-
-            this.post({ type: 'scanProgress', message: 'Analysis uploaded — waiting for server processing…' });
-
-            const storedToken = await this.context.secrets.get('sonarToken') || '';
-            const tokenType = this.context.globalState.get<'basic' | 'bearer'>('sonarTokenType') || 'basic';
-
-            const ceResult = await pollCeTask(
-                scanResult.ceTaskUrl,
-                storedToken,
-                tokenType,
-                (status) => {
-                    this.post({ type: 'scanProgress', message: `Server analysis status: ${status}` });
-                }
-            );
-
-            if (ceResult.status !== 'SUCCESS') {
-                this.post({ type: 'scanError', message: `Server analysis ${ceResult.status} — check SonarQube logs` });
-                this.toast(`Analysis ${ceResult.status}`, 'error');
-                return;
+            if (this.scanCompletedOk) {
+                await this.context.globalState.update(durationKey, Date.now() - startedAt);
             }
-
-            this.post({ type: 'scanProgress', message: 'Fetching issues from server…' });
-
-            const allIssues: SonarIssue[] = [];
-            let page = 1;
-            while (true) {
-                const result = await this.sonarApi.getBranchIssues(branch, page, 100);
-                allIssues.push(...result.issues);
-                if (page * result.ps >= result.total) { break; }
-                page++;
-            }
-
-            this.post({
-                type: 'scanComplete',
-                branch,
-                issues: allIssues,
-                total: allIssues.length,
-                dashboardUrl: scanResult.dashboardUrl
-            });
-            this.toast(`Scan complete — ${allIssues.length} issue(s) found on branch ${branch}`, allIssues.length === 0 ? 'success' : 'warning');
-
         } catch (err: any) {
-            this.post({ type: 'scanError', message: err.message });
-            this.toast(`Scan failed: ${err.message}`, 'error');
+            // Surface the API's actual error text, not just the HTTP status
+            const apiErrors = err.response?.data?.errors?.map((e: any) => e.msg).join('; ');
+            const message = apiErrors ? `${err.message} — ${apiErrors}` : err.message;
+            this.post({ type: 'scanError', message });
+            this.toast(`Scan failed: ${message}`, 'error');
         } finally {
             this.post({ type: 'loading', key: 'scan', value: false });
         }
+    }
+
+    protected async handleResetLocalServer(): Promise<void> {
+        this.post({ type: 'loading', key: 'scan', value: true });
+        try {
+            await resetLocalSonar();
+            // Stored credentials belong to the database volume that was just
+            // deleted — clear them so the next scan bootstraps fresh ones
+            // instead of trying (and failing) to authenticate with the old pair.
+            await this.context.secrets.delete('localSonarAdminPass');
+            await this.context.secrets.delete('localSonarToken');
+            await this.context.secrets.delete('localSonarDesiredPass');
+            await this.context.globalState.update('localProfilesHash', undefined);
+            this.toast('Local server reset — next scan will set it up fresh', 'success');
+        } catch (err: any) {
+            this.toast(`Reset failed: ${err.message}`, 'error');
+        } finally {
+            this.post({ type: 'loading', key: 'scan', value: false });
+        }
+    }
+
+    protected async handleConfirmLocalSetup(port: number, password: string, scope: 'full' | 'changed'): Promise<void> {
+        const chosenPort = Number(port) > 0 && Number(port) < 65536 ? Number(port) : DEFAULT_LOCAL_PORT;
+        await this.context.globalState.update('localSonarPort', chosenPort);
+        // One-shot approval: only skips the dialog for the container creation
+        // this scan is about to perform. If the container is ever removed
+        // again, runLocalScan() sees it missing and asks again.
+        this.localSetupApprovedOnce = true;
+        if (password && password.trim().length >= 8) {
+            await this.context.secrets.store('localSonarDesiredPass', password.trim());
+        }
+        return this.handleScanBranch(scope === 'changed' ? 'changed' : 'full', 'local');
+    }
+
+    /** Option A — fully local: private SonarQube in Docker, nothing leaves the machine */
+    private async runLocalScan(
+        root: string,
+        branch: string,
+        inclusions: string[] | undefined,
+        progress: (msg: string) => void,
+        scope: 'full' | 'changed'
+    ): Promise<void> {
+        progress('Target: LOCAL SonarQube (Docker) — code and issues stay on this machine');
+
+        // 1. Docker installed and running?
+        const docker = await dockerState();
+        if (docker === 'not-installed') {
+            this.post({ type: 'scanError', message: DOCKER_NOT_INSTALLED_MSG });
+            this.toast('Docker is not installed', 'error');
+            return;
+        }
+        if (docker === 'not-running') {
+            this.post({ type: 'scanError', message: DOCKER_NOT_RUNNING_MSG });
+            this.toast('Docker is not running — start Docker and scan again', 'warning');
+            return;
+        }
+
+        // 2. Container installed? If not, ask the user every time before
+        // creating anything — a missing container means fresh admin
+        // credentials, a fresh token, and a new image/volume, regardless of
+        // whether an older container was approved in the past.
+        const port = this.context.globalState.get<number>('localSonarPort') || DEFAULT_LOCAL_PORT;
+        const container = await containerState();
+        if (container === 'missing' && !this.localSetupApprovedOnce) {
+            this.post({
+                type: 'localSetupRequired',
+                scope,
+                defaults: {
+                    host: '127.0.0.1',
+                    port: DEFAULT_LOCAL_PORT,
+                    username: 'admin',
+                    password: crypto.randomBytes(9).toString('base64url'),
+                    image: 'sonarqube:community (~700MB download, ~2GB RAM while running)'
+                }
+            });
+            this.post({ type: 'scanStopped' });
+            return;
+        }
+
+        this.localSetupApprovedOnce = false;
+
+        const localUrl = localUrlFor(port);
+        progress(`Local server: ${localUrl}`);
+
+        await startLocalSonar(port, progress);
+        await waitForLocalSonarUp(port, progress);
+        if (this.scanCancelRequested) { this.post({ type: 'scanStopped' }); return; }
+
+        const desiredPass = await this.context.secrets.get('localSonarDesiredPass') || undefined;
+        const { token: localToken, adminAuth } = await ensureLocalAuth(this.context, port, progress, desiredPass);
+
+        // Import org quality profiles once per sync (hash guards re-import)
+        const backups = this.readProfileBackups();
+        if (backups) {
+            const backupsHash = crypto.createHash('sha1').update(JSON.stringify(backups.map(b => [b.language, b.name, b.xml.length]))).digest('hex');
+            if (this.context.globalState.get<string>('localProfilesHash') !== backupsHash) {
+                progress('Importing org quality profiles into local SonarQube…');
+                const skipped = await restoreQualityProfiles(port, backups, adminAuth, progress);
+                if (skipped.length > 0) {
+                    progress(`Skipped profiles (language not supported locally): ${skipped.join(', ')}`);
+                }
+                await this.context.globalState.update('localProfilesHash', backupsHash);
+            }
+        } else {
+            progress('No org profile backups found — using local default rules. Re-run "Sync Rules" to import org profiles.');
+        }
+
+        const props = readSonarProperties(root);
+        const configMeta = this.context.globalState.get<{ uri: string; projectKey: string }>('sonarConfigMeta');
+        const projectKey = props?.projectKey || configMeta?.projectKey;
+        if (!projectKey) {
+            this.post({ type: 'scanError', message: 'No sonar.projectKey found — add it to sonar-project.properties.' });
+            return;
+        }
+        await ensureLocalProject(port, projectKey, path.basename(root), adminAuth);
+        if (this.scanCancelRequested) { this.post({ type: 'scanStopped' }); return; }
+
+        progress(`Running sonar-scanner locally on branch: ${branch}`);
+        // No sonar.branch.name — local Community server doesn't support branch
+        // analysis; the checked-out working copy IS the branch being scanned.
+        const scanResult = await runSonarScanner(
+            root,
+            { hostUrl: localUrl, token: localToken, projectKey, inclusions },
+            (line) => {
+                if (line.includes('ERROR') || line.includes('WARN') || line.includes('INFO')) {
+                    progress(line.trim());
+                }
+            }
+        );
+
+        if (scanResult.cancelled || this.scanCancelRequested) {
+            this.post({ type: 'scanStopped' });
+            this.toast('Scan stopped', 'info');
+            return;
+        }
+        if (!scanResult.success) {
+            this.post({ type: 'scanError', message: scanResult.output });
+            this.toast('sonar-scanner failed — check the scan log', 'error');
+            return;
+        }
+        if (!scanResult.ceTaskUrl) {
+            this.post({ type: 'scanError', message: 'sonar-scanner completed but report-task.txt not found.' });
+            return;
+        }
+
+        progress('Analysis done — local server processing…');
+        const ceResult = await pollCeTask(
+            scanResult.ceTaskUrl, localToken, 'bearer',
+            (status) => progress(`Local analysis status: ${status}`),
+            () => this.scanCancelRequested
+        );
+
+        if (ceResult.status === 'CANCELLED') {
+            this.post({ type: 'scanStopped' });
+            this.toast('Scan stopped', 'info');
+            return;
+        }
+        if (ceResult.status !== 'SUCCESS') {
+            this.post({ type: 'scanError', message: `Local analysis ${ceResult.status} — check: docker logs sonarlens-local` });
+            return;
+        }
+
+        progress('Fetching issues from local server…');
+        const localApi = new SonarQubeApi({ uri: localUrl, projectKey, token: localToken, tokenType: 'bearer' });
+        const allIssues: SonarIssue[] = [];
+        let page = 1;
+        while (true) {
+            const result = await localApi.getProjectIssues(page, 500);
+            allIssues.push(...result.issues);
+            // The issues API cannot page past 10 000 results
+            if (page * result.ps >= Math.min(result.total, 10000)) {
+                if (result.total > 10000) {
+                    progress(`Note: ${result.total} issues total — showing the first 10000`);
+                }
+                break;
+            }
+            page++;
+        }
+
+        this.scanCompletedOk = true;
+        this.post({
+            type: 'scanComplete',
+            branch,
+            issues: allIssues,
+            total: allIssues.length,
+            dashboardUrl: `${localUrl}/dashboard?id=${encodeURIComponent(projectKey)}`,
+            local: true
+        });
+        this.toast(`Local scan complete — ${allIssues.length} issue(s) on branch ${branch}`, allIssues.length === 0 ? 'success' : 'warning');
+    }
+
+    /** Option C — central server: analysis report uploads to the configured SonarQube */
+    private async runServerScan(
+        root: string,
+        branch: string,
+        inclusions: string[] | undefined,
+        progress: (msg: string) => void
+    ): Promise<void> {
+        if (!this.sonarApi) {
+            this.post({ type: 'scanError', message: 'Save configuration first — server scan needs the central SonarQube settings.' });
+            return;
+        }
+
+        const configMeta  = this.context.globalState.get<{ uri: string; projectKey: string }>('sonarConfigMeta');
+        const hostUrl     = configMeta?.uri || this.sonarApi.uri;
+        const storedToken = await this.context.secrets.get('sonarToken') || '';
+        const tokenType   = this.context.globalState.get<'basic' | 'bearer'>('sonarTokenType') || 'basic';
+
+        progress(`Target server: ${hostUrl}`);
+        progress(`Running sonar-scanner on branch: ${branch}`);
+
+        const scanResult = await runSonarScanner(
+            root,
+            { hostUrl, token: storedToken, branchName: branch, inclusions },
+            (line) => {
+                if (line.includes('ERROR') || line.includes('WARN') || line.includes('INFO')) {
+                    progress(line.trim());
+                }
+            }
+        );
+
+        if (scanResult.cancelled || this.scanCancelRequested) {
+            this.post({ type: 'scanStopped' });
+            this.toast('Scan stopped', 'info');
+            return;
+        }
+        if (!scanResult.success) {
+            this.post({ type: 'scanError', message: scanResult.output });
+            this.toast('sonar-scanner failed — check the scan log', 'error');
+            return;
+        }
+        if (!scanResult.ceTaskUrl) {
+            this.post({ type: 'scanError', message: 'sonar-scanner completed but report-task.txt not found. Check sonar-project.properties.' });
+            return;
+        }
+
+        progress('Analysis uploaded — waiting for server processing…');
+        const ceResult = await pollCeTask(
+            scanResult.ceTaskUrl,
+            storedToken,
+            tokenType,
+            (status) => progress(`Server analysis status: ${status}`),
+            () => this.scanCancelRequested
+        );
+
+        if (ceResult.status === 'CANCELLED') {
+            this.post({ type: 'scanStopped' });
+            this.toast('Scan stopped', 'info');
+            return;
+        }
+        if (ceResult.status !== 'SUCCESS') {
+            this.post({ type: 'scanError', message: `Server analysis ${ceResult.status} — check SonarQube logs` });
+            this.toast(`Analysis ${ceResult.status}`, 'error');
+            return;
+        }
+
+        progress('Fetching issues from server…');
+        const allIssues: SonarIssue[] = [];
+        let page = 1;
+        while (true) {
+            const result = await this.sonarApi.getBranchIssues(branch, page, 500);
+            allIssues.push(...result.issues);
+            // The issues API cannot page past 10 000 results
+            if (page * result.ps >= Math.min(result.total, 10000)) {
+                if (result.total > 10000) {
+                    progress(`Note: ${result.total} issues total — showing the first 10000`);
+                }
+                break;
+            }
+            page++;
+        }
+
+        this.scanCompletedOk = true;
+        this.post({
+            type: 'scanComplete',
+            branch,
+            issues: allIssues,
+            total: allIssues.length,
+            dashboardUrl: scanResult.dashboardUrl
+        });
+        this.toast(`Scan complete — ${allIssues.length} issue(s) found on branch ${branch}`, allIssues.length === 0 ? 'success' : 'warning');
     }
 
     protected getWebviewContent(): string {
