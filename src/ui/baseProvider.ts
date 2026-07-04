@@ -735,7 +735,11 @@ export abstract class SonarQubeBaseProvider {
             return;
         }
         if (ceResult.status !== 'SUCCESS') {
-            this.post({ type: 'scanError', message: `Local analysis ${ceResult.status} — check: docker logs sonarlens-local` });
+            const reason = ceResult.errorMessage ? ` — ${ceResult.errorMessage}` : '';
+            const hint = ceResult.status === 'TIMEOUT'
+                ? `Local analysis is taking longer than 15 minutes${reason}. It may still finish in the background — check ${localUrl}/dashboard?id=${encodeURIComponent(projectKey)} in a few minutes, or run: docker logs sonarlens-local`
+                : `Local analysis ${ceResult.status}${reason} — check: docker logs sonarlens-local`;
+            this.post({ type: 'scanError', message: hint });
             return;
         }
 
@@ -828,7 +832,11 @@ export abstract class SonarQubeBaseProvider {
             return;
         }
         if (ceResult.status !== 'SUCCESS') {
-            this.post({ type: 'scanError', message: `Server analysis ${ceResult.status} — check SonarQube logs` });
+            const reason = ceResult.errorMessage ? ` — ${ceResult.errorMessage}` : '';
+            const hint = ceResult.status === 'TIMEOUT'
+                ? `Server analysis is taking longer than 15 minutes${reason}. It may still finish in the background — check ${hostUrl}/project/issues?id=${encodeURIComponent(this.sonarApi.projectKey)} in a few minutes, or ask your SonarQube admin to check the Background Tasks page.`
+                : `Server analysis ${ceResult.status}${reason} — check the Background Tasks page on your SonarQube server for details`;
+            this.post({ type: 'scanError', message: hint });
             this.toast(`Analysis ${ceResult.status}`, 'error');
             return;
         }

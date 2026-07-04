@@ -86,10 +86,6 @@ export class SonarQubeApi {
             axiosConfig.auth = { username: config.token, password: '' };
         }
         this.client = axios.create(axiosConfig);
-    }
-
-    get uri(): string {
-        return this.config.uri;
 
         this.client.interceptors.response.use(
             res => res,
@@ -118,6 +114,14 @@ export class SonarQubeApi {
                 return Promise.reject(enhanced);
             }
         );
+    }
+
+    get uri(): string {
+        return this.config.uri;
+    }
+
+    get projectKey(): string {
+        return this.config.projectKey;
     }
 
     async getPullRequests(): Promise<PullRequest[]> {

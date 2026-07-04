@@ -343,8 +343,8 @@ export async function pollCeTask(
     tokenType: 'basic' | 'bearer',
     onProgress: (status: string) => void,
     shouldCancel?: () => boolean,
-    maxWaitMs = 300000
-): Promise<{ status: string; analysisId?: string }> {
+    maxWaitMs = 900000
+): Promise<{ status: string; analysisId?: string; errorMessage?: string }> {
     const headers: Record<string, string> = {};
     const auth = tokenType === 'bearer'
         ? undefined
@@ -354,19 +354,27 @@ export async function pollCeTask(
     }
 
     const start = Date.now();
+    let lastStatus = '';
     while (Date.now() - start < maxWaitMs) {
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 5000));
         if (shouldCancel?.()) { return { status: 'CANCELLED' }; }
         try {
             const res = await axios.get(ceTaskUrl, { headers, auth, timeout: 15000 });
             const task = res.data?.task;
             const status: string = task?.status ?? 'UNKNOWN';
-            onProgress(status);
+            // The elapsed-time nudge only matters once minutes have passed —
+            // otherwise just report on status change, to avoid a wall of
+            // identical "IN_PROGRESS" lines for a fast analysis.
+            const elapsedS = Math.round((Date.now() - start) / 1000);
+            if (status !== lastStatus || elapsedS % 30 === 0) {
+                onProgress(elapsedS >= 60 ? `${status} (${Math.round(elapsedS / 60)}m elapsed)` : status);
+                lastStatus = status;
+            }
             if (status === 'SUCCESS') {
                 return { status, analysisId: task?.analysisId };
             }
             if (status === 'FAILED' || status === 'CANCELLED') {
-                return { status };
+                return { status, errorMessage: task?.errorMessage };
             }
         } catch {
             // retry on transient errors
