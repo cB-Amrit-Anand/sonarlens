@@ -1,19 +1,40 @@
 {
   "name": "sonarlens",
   "displayName": "SonarLens",
-  "description": "Fetch SonarQube issues and fix them using AI",
-  "version": "0.1.0",
+  "description": "View SonarQube issues inside your editor and fix them with AI — supports SSO, local dismiss, and bulk AI fixes.",
+  "version": "1.0.3",
   "publisher": "sonarlens",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/cB-Amrit-Anand/sonarlens"
   },
+  "bugs": {
+    "url": "https://github.com/cB-Amrit-Anand/sonarlens/issues"
+  },
+  "homepage": "https://github.com/cB-Amrit-Anand/sonarlens#readme",
+  "keywords": [
+    "sonarqube",
+    "sonarcloud",
+    "code quality",
+    "static analysis",
+    "ai fix",
+    "openai",
+    "linter",
+    "issues"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Linters",
     "Other"
   ],
+  "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -53,19 +74,23 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
     "pretest": "npm run compile",
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
-    "typescript": "^5.3.0"
+    "ts-loader": "^9.6.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.107.2",
+    "webpack-cli": "^7.0.3"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
