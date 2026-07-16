@@ -4,6 +4,14 @@ All notable changes to SonarLens are documented here.
 
 ---
 
+## [1.0.5] - 2026-07-16
+
+### Fixed
+- Extension always opened to the Settings page on every load, even when fully configured — `configStatus` only recognized configuration coming from a `sonar-project.properties` file and ignored a valid manual configuration saved via the Settings UI (URI/Project Key + token stored in extension state, no properties file). Manually-saved config is now treated as equally valid, so a configured workspace opens straight to the main view (Local Scan tab) as intended
+- Back button on the Settings page could stay permanently hidden after being reached via the gear icon (⚙) if an earlier load had reported "not configured" — the gear button now always restores it, since a back destination exists any time Settings is opened from the main view
+
+---
+
 ## [1.0.4] - 2026-07-16
 
 ### Added

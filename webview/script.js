@@ -59,7 +59,12 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 /* ── Settings button + Back button ──────────────────────────────────────── */
-document.getElementById('btn-settings')?.addEventListener('click', () => showPage('settings'));
+document.getElementById('btn-settings')?.addEventListener('click', () => {
+    showPage('settings');
+    // Reached via the gear icon from the main view — a back destination
+    // always exists here, regardless of what configStatus last reported.
+    document.getElementById('btn-back')?.classList.remove('hidden');
+});
 document.getElementById('btn-back')?.addEventListener('click', () => showPage('main'));
 
 /* ── Open in Editor Tab buttons ──────────────────────────────────────────── */

@@ -58,10 +58,12 @@ export abstract class SonarQubeBaseProvider {
         const usableToken = tokenMatchesUri ? storedToken : '';
         const uriChanged = !!storedToken && !tokenMatchesUri && !!activeUri;
 
+        const savedConfig = this.context.globalState.get<Omit<SonarConfig, 'token'>>('sonarConfigMeta');
+        const validSavedConfig = !!(savedConfig?.uri && savedConfig?.projectKey);
+
         if (validProps) {
             this.post({ type: 'loadConfig', data: { ...propsConfig, token: usableToken, aiApiKey: storedAiKey, tokenType: storedTokenType, fromFile: true } });
         } else {
-            const savedConfig = this.context.globalState.get<Omit<SonarConfig, 'token'>>('sonarConfigMeta');
             if (savedConfig) {
                 this.post({ type: 'loadConfig', data: { ...savedConfig, token: usableToken, aiApiKey: storedAiKey, tokenType: storedTokenType } });
             }
@@ -72,17 +74,24 @@ export abstract class SonarQubeBaseProvider {
             this.post({ type: 'tokenNeedsRefresh', uri: activeUri });
         }
 
-        if (validProps && usableToken) {
+        // Config can come from sonar-project.properties OR from settings
+        // saved manually (globalState) — either is a complete configuration,
+        // not just the properties-file path.
+        const effectiveUri        = validProps ? propsConfig!.uri! : savedConfig?.uri;
+        const effectiveProjectKey = validProps ? propsConfig!.projectKey! : savedConfig?.projectKey;
+        const hasConfig = validProps || validSavedConfig;
+
+        if (hasConfig && usableToken && effectiveUri && effectiveProjectKey) {
             this.sonarApi = new SonarQubeApi({
-                uri: propsConfig!.uri!.replace(/\/$/, ''),
-                projectKey: propsConfig!.projectKey!,
+                uri: effectiveUri.replace(/\/$/, ''),
+                projectKey: effectiveProjectKey,
                 token: usableToken,
                 tokenType: storedTokenType
             });
             this.aiProvider = storedAiKey ? new AiFixProvider(storedAiKey) : undefined;
         }
 
-        this.post({ type: 'configStatus', configured: !!(validProps && usableToken) });
+        this.post({ type: 'configStatus', configured: !!(hasConfig && usableToken) });
 
         // Restore cached rules status and current branch for the scan tab
         const cache = this.context.globalState.get<StoredRulesCache>('sonarRulesCache');
