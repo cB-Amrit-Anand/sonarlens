@@ -4,24 +4,18 @@ All notable changes to SonarLens are documented here.
 
 ---
 
-## [1.0.5] - 2026-07-16
+## [1.0.4] - 2026-07-16
 
 ### Added
 - Local Scan — **File filter dropdown**: lists every distinct file with issues (with a per-file issue count), multi-select checkboxes, combines with the severity filter and text search
 - Local Scan file filter — sort files by **Name** or by **Issue count**, and a resizable dropdown (drag the corner) for long paths
 
 ### Fixed
+- Stored SonarQube token silently reused against a different server after the configured URI changed — token is now bound to the URI it was issued for; a URI change withholds the stale token, prompts for a fresh one, and blocks saving until it's replaced
+- Settings form errors (missing URI/Project Key/Token, stale token after URI change) now surface as an inline banner on the Settings page in addition to the toast
 - Local Scan error messages were silently cut down to only lines containing the word "ERROR" — a failure's actual cause (missing file, path, stack trace) often sits on the next line and was dropped; the full scanner failure output is now shown, in a scrollable box
 - Local Scan results table was truncating file paths and issue messages with `…` — both now wrap fully instead of clipping
 - Local Scan now opens to the **Local Scan tab** by default once configured (was always defaulting to Pull Requests)
-
----
-
-## [1.0.4] - 2026-07-16
-
-### Fixed
-- Stored SonarQube token silently reused against a different server after the configured URI changed — token is now bound to the URI it was issued for; a URI change withholds the stale token, prompts for a fresh one, and blocks saving until it's replaced
-- Settings form errors (missing URI/Project Key/Token, stale token after URI change) now surface as an inline banner on the Settings page in addition to the toast
 
 ### Changed
 - `.vscodeignore` now also excludes `.claude/**` and `docs/**` from the packaged extension
