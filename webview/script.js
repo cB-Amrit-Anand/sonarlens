@@ -29,6 +29,8 @@ const state = {
     scanPage:           1,
     scanPageSize:       500,
     scanSelectedKeys:   /** @type {Set<string>} */ (new Set()),
+    tokenBoundUri:      /** @type {string} */ (''),
+    loadedToken:        /** @type {string} */ (''),
     allRules:           /** @type {any[]} */ ([]),
     rulesPage:          1,
     rulesPageSize:      50,
@@ -110,6 +112,27 @@ document.querySelectorAll('.eye-btn').forEach(btn => {
     });
 });
 
+/* ── Settings error banner ───────────────────────────────────────── */
+/** @param {string[]} messages */
+function showSettingsError(messages) {
+    const banner = document.getElementById('settings-error-banner');
+    if (!banner) { return; }
+    if (!messages.length) {
+        banner.classList.add('hidden');
+        banner.innerHTML = '';
+        return;
+    }
+    banner.innerHTML = messages.length === 1
+        ? `<strong>${esc(messages[0])}</strong>`
+        : `<strong>Fix the following before saving:</strong><ul>${messages.map(m => `<li>${esc(m)}</li>`).join('')}</ul>`;
+    banner.classList.remove('hidden');
+    banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function clearSettingsError() { showSettingsError([]); }
+['sonar-uri', 'project-key', 'sonar-token'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', clearSettingsError);
+});
+
 /* ── Config form ─────────────────────────────────────────────────────────── */
 document.getElementById('btn-save-config')?.addEventListener('click', () => {
     const cfg = {
@@ -119,16 +142,23 @@ document.getElementById('btn-save-config')?.addEventListener('click', () => {
         aiApiKey:   val('ai-api-key'),
         tokenType:  /** @type {HTMLSelectElement} */(document.getElementById('token-type'))?.value || 'basic'
     };
-    if (!cfg.uri || !cfg.projectKey) {
-        return showToast('SonarQube URI and Project Key are required', 'error');
-    }
     const ssoMode = document.getElementById('auth-tab-sso')?.classList.contains('active');
-    if (!cfg.token && !ssoMode) {
-        return showToast('SonarQube Token is required', 'error');
+    const uriNorm = cfg.uri.replace(/\/+$/, '');
+    const uriTokenMismatch = !!state.tokenBoundUri && !!uriNorm && uriNorm !== state.tokenBoundUri && cfg.token === state.loadedToken;
+
+    const missing = [];
+    if (!cfg.uri)                              { missing.push('SonarQube URI is required'); }
+    if (!cfg.projectKey)                       { missing.push('Project Key is required'); }
+    if (uriTokenMismatch)                      { missing.push('SonarQube URI changed — generate and enter a new token for this server'); }
+    else if (!cfg.token && ssoMode)             { missing.push('Complete SSO login first — click "Open browser & Login"'); }
+    else if (!cfg.token)                        { missing.push('SonarQube Token is required'); }
+
+    if (missing.length) {
+        showSettingsError(missing);
+        return showToast(missing[0], 'error');
     }
-    if (!cfg.token && ssoMode) {
-        return showToast('Complete SSO login first — click "Open browser & Login"', 'error');
-    }
+    clearSettingsError();
+
     state.sonarUri   = cfg.uri.replace(/\/+$/, '');
     state.projectKey = cfg.projectKey;
     state.hasAiKey   = !!cfg.aiApiKey;
@@ -327,6 +357,7 @@ window.addEventListener('message', e => {
         case 'loadConfig':      return onLoadConfig(msg.data);
         case 'noPropertiesFile': return onNoPropertiesFile();
         case 'configStatus':    return onConfigStatus(msg.configured);
+        case 'tokenNeedsRefresh': return onTokenNeedsRefresh(msg.uri);
         case 'configSaved':     return onConfigSaved();
         case 'loading':         return onLoading(msg.key, msg.value);
         case 'prsLoaded':       state.prsList = msg.data || []; return renderPRs();
@@ -361,14 +392,43 @@ window.addEventListener('message', e => {
 function onLoadConfig(cfg) {
     if (cfg.uri)        { setVal('sonar-uri', cfg.uri);           state.sonarUri    = cfg.uri.replace(/\/+$/, ''); }
     if (cfg.projectKey) { setVal('project-key', cfg.projectKey);  state.projectKey  = cfg.projectKey; }
-    if (cfg.token)      setVal('sonar-token', cfg.token);
+    if (cfg.token)      { setVal('sonar-token', cfg.token); state.loadedToken = cfg.token; }
     if (cfg.aiApiKey)   { setVal('ai-api-key', cfg.aiApiKey); state.hasAiKey = true; }
     if (cfg.tokenType) {
         const sel = /** @type {HTMLSelectElement} */(document.getElementById('token-type'));
         if (sel) { sel.value = cfg.tokenType; }
     }
     if (cfg.fromFile)   document.getElementById('missing-props-warning')?.classList.add('hidden');
+    // A token only loaded here means the extension confirmed it matches the
+    // current URI — that's the URI this token is now bound to.
+    if (cfg.token && cfg.uri) { state.tokenBoundUri = cfg.uri.replace(/\/+$/, ''); }
 }
+
+/**
+ * Extension found a stored token that was issued for a different SonarQube
+ * URI than the one now active — it withheld the token rather than risk
+ * scanning/fetching against the wrong server with it.
+ */
+function onTokenNeedsRefresh(uri) {
+    state.tokenBoundUri = uri || '';
+    setVal('sonar-token', '');
+    document.getElementById('token-refresh-notice')?.classList.remove('hidden');
+    showSettingsError(['SonarQube URI changed — generate and enter a new token for this server']);
+}
+
+/** Live check while the user edits the URI field before saving. */
+function checkUriTokenMismatch() {
+    const uri = val('sonar-uri').replace(/\/+$/, '');
+    const notice = document.getElementById('token-refresh-notice');
+    if (!notice) { return; }
+    const tokenField = /** @type {HTMLInputElement} */(document.getElementById('sonar-token'));
+    const stillHasOldToken = tokenField && tokenField.value === state.loadedToken && state.loadedToken;
+    const mismatched = !!uri && !!state.tokenBoundUri && uri !== state.tokenBoundUri && stillHasOldToken;
+    notice.classList.toggle('hidden', !mismatched);
+    if (mismatched && tokenField) { tokenField.value = ''; }
+}
+document.getElementById('sonar-uri')?.addEventListener('input', () => checkUriTokenMismatch());
+document.getElementById('sonar-uri')?.addEventListener('change', () => checkUriTokenMismatch());
 
 function onNoPropertiesFile() {
     document.getElementById('missing-props-warning')?.classList.remove('hidden');
@@ -381,6 +441,10 @@ function onConfigStatus(configured) {
 }
 
 function onConfigSaved() {
+    state.tokenBoundUri = val('sonar-uri').replace(/\/+$/, '');
+    state.loadedToken   = val('sonar-token');
+    document.getElementById('token-refresh-notice')?.classList.add('hidden');
+    clearSettingsError();
     showPage('main');
     showTab('prs');
 }

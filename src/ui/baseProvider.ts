@@ -46,28 +46,43 @@ export abstract class SonarQubeBaseProvider {
         const validProps = !!(propsConfig?.uri && propsConfig?.projectKey);
 
         const storedTokenType = this.context.globalState.get<'basic' | 'bearer'>('sonarTokenType') || 'basic';
+        const tokenBoundUri = this.context.globalState.get<string>('sonarTokenBoundUri');
+
+        // The saved token was issued for a specific SonarQube URI. If the
+        // active URI (from sonar-project.properties or the last saved
+        // settings) no longer matches, the token is almost certainly wrong
+        // for this server — don't autofill it, and prompt for a fresh one.
+        const activeUri = (validProps ? propsConfig!.uri : this.context.globalState.get<{ uri: string }>('sonarConfigMeta')?.uri)
+            ?.replace(/\/+$/, '');
+        const tokenMatchesUri = !!storedToken && !!tokenBoundUri && tokenBoundUri === activeUri;
+        const usableToken = tokenMatchesUri ? storedToken : '';
+        const uriChanged = !!storedToken && !tokenMatchesUri && !!activeUri;
 
         if (validProps) {
-            this.post({ type: 'loadConfig', data: { ...propsConfig, token: storedToken, aiApiKey: storedAiKey, tokenType: storedTokenType, fromFile: true } });
+            this.post({ type: 'loadConfig', data: { ...propsConfig, token: usableToken, aiApiKey: storedAiKey, tokenType: storedTokenType, fromFile: true } });
         } else {
             const savedConfig = this.context.globalState.get<Omit<SonarConfig, 'token'>>('sonarConfigMeta');
             if (savedConfig) {
-                this.post({ type: 'loadConfig', data: { ...savedConfig, token: storedToken, aiApiKey: storedAiKey, tokenType: storedTokenType } });
+                this.post({ type: 'loadConfig', data: { ...savedConfig, token: usableToken, aiApiKey: storedAiKey, tokenType: storedTokenType } });
             }
             this.post({ type: 'noPropertiesFile' });
         }
 
-        if (validProps && storedToken) {
+        if (uriChanged) {
+            this.post({ type: 'tokenNeedsRefresh', uri: activeUri });
+        }
+
+        if (validProps && usableToken) {
             this.sonarApi = new SonarQubeApi({
                 uri: propsConfig!.uri!.replace(/\/$/, ''),
                 projectKey: propsConfig!.projectKey!,
-                token: storedToken,
+                token: usableToken,
                 tokenType: storedTokenType
             });
             this.aiProvider = storedAiKey ? new AiFixProvider(storedAiKey) : undefined;
         }
 
-        this.post({ type: 'configStatus', configured: !!(validProps && storedToken) });
+        this.post({ type: 'configStatus', configured: !!(validProps && usableToken) });
 
         // Restore cached rules status and current branch for the scan tab
         const cache = this.context.globalState.get<StoredRulesCache>('sonarRulesCache');
@@ -118,8 +133,21 @@ export abstract class SonarQubeBaseProvider {
     }
 
     protected async handleSaveConfig(cfg: SaveConfigPayload): Promise<void> {
+        const newUri = cfg.uri.replace(/\/+$/, '');
+        const tokenBoundUri = this.context.globalState.get<string>('sonarTokenBoundUri');
+        const storedToken = await this.context.secrets.get('sonarToken') || '';
+
+        // Token is unchanged from what's already saved (webview echoes the
+        // stored token back), but it was issued for a different URI — the
+        // user changed the URI without providing a new token. Refuse to
+        // save with a token that doesn't belong to this server.
+        if (cfg.token && cfg.token === storedToken && tokenBoundUri && tokenBoundUri !== newUri) {
+            this.post({ type: 'tokenNeedsRefresh', uri: newUri });
+            return this.toast('SonarQube URI changed — generate and enter a new token for this server before saving', 'warning');
+        }
+
         const sonarConfig: SonarConfig = {
-            uri: cfg.uri.replace(/\/$/, ''),
+            uri: newUri,
             projectKey: cfg.projectKey,
             token: cfg.token,
             tokenType: cfg.tokenType || 'basic'
@@ -137,6 +165,7 @@ export abstract class SonarQubeBaseProvider {
             projectKey: sonarConfig.projectKey
         });
         await this.context.globalState.update('sonarTokenType', sonarConfig.tokenType);
+        await this.context.globalState.update('sonarTokenBoundUri', newUri);
 
         this.post({ type: 'configSaved' });
         this.toast('Configuration saved!', 'success');

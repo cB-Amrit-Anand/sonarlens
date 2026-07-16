@@ -114,6 +114,12 @@ input[readonly] { opacity: .55; cursor: default; }
     border-radius: 3px;
     white-space: pre-wrap;
 }
+.warning-box.error-box {
+    background: rgba(244,71,71,.1);
+    border-color: var(--error);
+    color: var(--error);
+}
+.warning-box.error-box ul { margin: 4px 0 0 18px; }
 
 /* ── Auth method tabs (settings) ─────────────────────────────────────────── */
 .auth-method-tabs {

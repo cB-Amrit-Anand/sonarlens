@@ -4,6 +4,17 @@ All notable changes to SonarLens are documented here.
 
 ---
 
+## [1.0.4] - 2026-07-16
+
+### Fixed
+- Stored SonarQube token silently reused against a different server after the configured URI changed — token is now bound to the URI it was issued for; a URI change withholds the stale token, prompts for a fresh one, and blocks saving until it's replaced
+- Settings form errors (missing URI/Project Key/Token, stale token after URI change) now surface as an inline banner on the Settings page in addition to the toast
+
+### Changed
+- `.vscodeignore` now also excludes `.claude/**` and `docs/**` from the packaged extension
+
+---
+
 ## [1.0.3] - 2026-07-04
 
 ### Added

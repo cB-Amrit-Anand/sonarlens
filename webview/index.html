@@ -21,6 +21,8 @@
             <span class="settings-title">Settings</span>
         </div>
 
+        <div id="settings-error-banner" class="warning-box error-box hidden"></div>
+
         <div id="missing-props-warning" class="warning-box hidden">
             <strong>sonar-project.properties not found</strong><br>
             Create it in your project root:
@@ -63,6 +65,10 @@ sonar.projectKey=your-project-key</pre>
                     <button class="eye-btn icon-btn" data-target="sonar-token" title="Show/hide token">&#128065;</button>
                 </div>
                 <span class="hint">Generate at SonarQube → My Account → Security → Generate Token. Needs at least <em>Browse</em> permission.</span>
+                <div id="token-refresh-notice" class="warning-box hidden" style="margin-top:8px">
+                    <strong>SonarQube URI changed</strong><br>
+                    The saved token was issued for a different server. Generate a new token on the new server and paste it above before saving.
+                </div>
             </div>
         </div>
 
