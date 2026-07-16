@@ -292,6 +292,20 @@ sonar.projectKey=your-project-key</pre>
                             <label class="sev-check"><input type="checkbox" class="scan-sev-filter" value="INFO"     checked><span class="sev sev-INFO">INFO</span></label>
                         </div>
                     </div>
+                    <div class="sev-dropdown-wrap">
+                        <button id="scan-file-dropdown-btn" class="btn btn-secondary btn-sm">File: All &#9660;</button>
+                        <div id="scan-file-dropdown-menu" class="dropdown-menu scan-file-dropdown-menu hidden">
+                            <input id="scan-file-dropdown-search" type="text" class="filter-input" placeholder="Filter files…" />
+                            <div class="scan-file-dropdown-header">
+                                <span>Sort by</span>
+                                <div class="sort-toggle">
+                                    <button id="scan-file-sort-name" class="active" data-sort="name">Name</button>
+                                    <button id="scan-file-sort-count" data-sort="count">Issues</button>
+                                </div>
+                            </div>
+                            <div id="scan-file-dropdown-list" class="scan-file-dropdown-list"></div>
+                        </div>
+                    </div>
                     <span class="spacer"></span>
                     <button id="scan-btn-export-selected" class="btn btn-secondary btn-sm hidden">Export Selected (<span id="scan-sel-count">0</span>)</button>
                     <div class="export-wrap">

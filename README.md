@@ -10,6 +10,7 @@ View SonarQube / SonarCloud issues directly inside VS Code (and compatible edito
 |---------|-------------|
 | **Browse PRs & Issues** | Fetch pull requests and their SonarQube issues in a sidebar panel |
 | **Local Scan** | Run `sonar-scanner` against your working copy — analyze locally in a private Docker SonarQube, or upload to your central server, tagged by git branch |
+| **File Filter (Local Scan)** | Filter scan results to specific files via a searchable, resizable dropdown of distinct files with issue counts; sort by name or issue count |
 | **AI Fix** | Fix individual issues, selected issues, or all low-severity issues using OpenAI |
 | **SSO Login** | Authenticate via your company SSO — browser opens, token auto-saved |
 | **Local Dismiss** | Hide issues locally without needing SonarQube permissions |

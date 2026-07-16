@@ -398,6 +398,23 @@ td { padding: 7px 8px; vertical-align: middle; }
 .msg-expanded .cell-msg { white-space: normal; overflow: visible; text-overflow: unset; }
 .msg-expanded .cell-file { white-space: normal; overflow: visible; text-overflow: unset; max-width: none; word-break: break-all; }
 
+/* Local Scan results table — full message/path always visible, no ellipsis clipping */
+.scan-msg-cell { max-width: 480px; }
+.scan-cell-msg {
+    font-size: 11px;
+    display: block;
+    white-space: normal;
+    word-break: break-word;
+}
+.scan-cell-file {
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    display: block;
+    white-space: normal;
+    word-break: break-all;
+}
+
 .issue-link {
     color: var(--accent);
     text-decoration: none;
@@ -486,6 +503,43 @@ td { padding: 7px 8px; vertical-align: middle; }
 
 .sev-check { display: flex; align-items: center; gap: 3px; cursor: pointer; }
 .sev-check input { cursor: pointer; width: 12px; height: 12px; }
+
+/* ── Scan file-filter dropdown ───────────────────────────────────────────── */
+.scan-file-dropdown-menu {
+    left: 0; right: auto; width: min(340px, 95vw); max-width: 95vw;
+    min-width: 340px;
+    padding: 6px;
+    resize: horizontal;
+    overflow: auto;
+}
+.scan-file-dropdown-menu .filter-input { margin-bottom: 4px; }
+.scan-file-dropdown-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 2px 6px 6px; font-size: 10px; color: var(--text-muted);
+}
+.scan-file-dropdown-header .sort-toggle {
+    display: flex; gap: 2px;
+}
+.scan-file-dropdown-header button {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    font-size: 10px; padding: 2px 6px; border-radius: 3px; cursor: pointer;
+}
+.scan-file-dropdown-header button.active {
+    background: var(--bg-hover); color: var(--text); border-color: var(--accent);
+}
+.scan-file-dropdown-list { max-height: 240px; overflow-y: auto; }
+.scan-file-check {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 5px 6px; cursor: pointer; font-size: 11px; border-radius: 3px;
+}
+.scan-file-check:hover { background: var(--bg-hover); }
+.scan-file-check input { cursor: pointer; width: 12px; height: 12px; flex: none; margin-top: 2px; }
+.scan-file-check .scan-file-path {
+    flex: 1; overflow-wrap: anywhere; white-space: normal;
+    font-family: 'Menlo','Consolas',monospace; font-size: 10.5px; line-height: 1.4;
+}
+.scan-file-check .scan-file-count { color: var(--text-muted); font-size: 10px; flex: none; }
+.scan-file-dropdown-empty { padding: 8px 6px; font-size: 11px; color: var(--text-muted); }
 .filter-input {
     height: 24px;
     font-size: 11px;
@@ -654,12 +708,18 @@ td { padding: 7px 8px; vertical-align: middle; }
 .scan-err-header {
     font-size: 12px; font-weight: 700; color: var(--error); margin-bottom: 8px;
 }
-.scan-err-body { display: flex; flex-direction: column; gap: 3px; }
+.scan-err-body {
+    display: flex; flex-direction: column; gap: 3px;
+    max-height: 300px; overflow-y: auto;
+}
 .scan-err-section {
     font-size: 11px; font-weight: 700; color: var(--text-muted);
     margin-top: 6px; text-transform: uppercase; letter-spacing: .4px;
 }
-.scan-err-line { font-size: 11px; color: var(--text); line-height: 1.6; }
+.scan-err-line {
+    font-size: 11px; color: var(--text); line-height: 1.6;
+    white-space: pre-wrap; word-break: break-all;
+}
 .scan-err-line code {
     font-family: 'Menlo','Consolas',monospace; font-size: 10px;
     background: var(--bg3); padding: 1px 5px; border-radius: 3px;

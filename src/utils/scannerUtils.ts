@@ -57,9 +57,13 @@ Check:
   3. sonar.login or sonar.token is set in sonar-project.properties (or SONAR_TOKEN env var)`;
     }
     if (output.includes('EXECUTION FAILURE')) {
-        // Extract just the ERROR lines for a compact message
-        const errorLines = output.split('\n')
-            .filter(l => l.includes('ERROR') || l.includes('EXECUTION FAILURE'))
+        // Keep every line from the first ERROR onward — a failure's cause
+        // (missing file, stack trace, path) is often on a continuation line
+        // that doesn't itself contain the word "ERROR".
+        const lines = output.split('\n');
+        const firstErrorIdx = lines.findIndex(l => l.includes('ERROR') || l.includes('EXECUTION FAILURE'));
+        if (firstErrorIdx === -1) { return null; }
+        const errorLines = lines.slice(firstErrorIdx)
             .map(l => l.replace(/^\d{2}:\d{2}:\d{2}\.\d{3}\s+/, '').trim())
             .filter(Boolean)
             .join('\n');

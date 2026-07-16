@@ -29,6 +29,8 @@ const state = {
     scanPage:           1,
     scanPageSize:       500,
     scanSelectedKeys:   /** @type {Set<string>} */ (new Set()),
+    scanFileFilter:     /** @type {Set<string>} */ (new Set()),
+    scanFileSort:       /** @type {'name'|'count'} */ ('name'),
     tokenBoundUri:      /** @type {string} */ (''),
     loadedToken:        /** @type {string} */ (''),
     allRules:           /** @type {any[]} */ ([]),
@@ -436,6 +438,7 @@ function onNoPropertiesFile() {
 
 function onConfigStatus(configured) {
     showPage(configured ? 'main' : 'settings');
+    if (configured) { showTab('scan'); }
     // Hide Back button when opening settings for the first time (nothing to go back to)
     document.getElementById('btn-back')?.classList.toggle('hidden', !configured);
 }
@@ -446,7 +449,7 @@ function onConfigSaved() {
     document.getElementById('token-refresh-notice')?.classList.add('hidden');
     clearSettingsError();
     showPage('main');
-    showTab('prs');
+    showTab('scan');
 }
 
 /* ── Loading states ──────────────────────────────────────────────────────── */
@@ -1202,6 +1205,11 @@ function onScanStarted(branch, expectedMs) {
     state.scanBranch = branch;
     state.scanPage = 1;
     state.scanSelectedKeys.clear();
+    state.scanFileFilter.clear();
+    state.scanFileSort = 'name';
+    document.querySelectorAll('#scan-file-dropdown-menu .sort-toggle button')
+        .forEach(b => b.classList.toggle('active', /** @type {HTMLElement} */(b).dataset.sort === 'name'));
+    updateScanFileDropdownLabel();
     startScanTimer(expectedMs);
     document.getElementById('scan-progress-box')?.classList.remove('hidden');
     document.getElementById('scan-results-summary')?.classList.add('hidden');
@@ -1366,19 +1374,23 @@ function onScanError(message) {
                     `).join('')}
                 </div>`;
         } else {
-            // General error — pull out key lines
-            const errorLines = lines.filter(l => l.includes('ERROR') || l.includes('mandatory') || l.includes('must define'));
-            const display = errorLines.length > 0 ? errorLines : lines.slice(0, 6);
+            // Show the full error message — truncating drops the file path
+            // or cause when it lands on a line without the word "ERROR".
             errBox.innerHTML = `
                 <div class="scan-err-header">&#10007; Scan failed</div>
                 <div class="scan-err-body">
-                    ${display.map(l => `<div class="scan-err-line">${esc(l)}</div>`).join('')}
+                    ${lines.map(l => `<div class="scan-err-line">${esc(l)}</div>`).join('')}
                 </div>`;
         }
     }
 
     const container = document.getElementById('scan-issues-container');
     if (container) { container.innerHTML = ''; }
+}
+
+/** @param {any} issue */
+function scanIssueFilePath(issue) {
+    return issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
 }
 
 function renderScanIssues() {
@@ -1394,8 +1406,9 @@ function renderScanIssues() {
 
     const filtered = state.scanIssues.filter(issue => {
         if (!activeSevs.has(issue.severity)) { return false; }
+        const file = scanIssueFilePath(issue);
+        if (state.scanFileFilter.size > 0 && !state.scanFileFilter.has(file)) { return false; }
         if (q) {
-            const file = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
             const haystack = `${file} ${issue.message || ''}`.toLowerCase();
             if (!haystack.includes(q)) { return false; }
         }
@@ -1423,7 +1436,7 @@ function renderScanIssues() {
     const allSelected = pageIssues.every(i => state.scanSelectedKeys.has(i.key));
 
     const rows = pageIssues.map((issue, idx) => {
-        const filePath = issue.component.includes(':') ? issue.component.split(':').slice(1).join(':') : issue.component;
+        const filePath = scanIssueFilePath(issue);
         const line     = issue.textRange?.startLine ?? issue.line ?? '—';
         const projectId = issue.project || state.projectKey;
         const selected = state.scanSelectedKeys.has(issue.key);
@@ -1437,11 +1450,11 @@ function renderScanIssues() {
             <td><input type="checkbox" class="row-check" data-action="selectScan" data-issue-key="${esc(issue.key)}" ${selected ? 'checked' : ''}></td>
             <td class="cell-sr">${pageOffset + idx + 1}</td>
             <td><span class="sev sev-${issue.severity}">${issue.severity}</span></td>
-            <td class="msg-cell">
-                <span class="cell-msg">${issueUrl
+            <td class="scan-msg-cell">
+                <span class="scan-cell-msg" title="${esc(issue.message)}">${issueUrl
                     ? `<a class="issue-link" data-action="openScanIssue" data-url="${esc(issueUrl)}" href="#" title="Open in SonarQube">${esc(issue.message)}</a>`
                     : esc(issue.message)}</span>
-                <span class="cell-file">${esc(filePath)}:${line}</span>
+                <span class="scan-cell-file" title="${esc(filePath)}:${line}">${esc(filePath)}:${line}</span>
             </td>
             <td><span class="stat stat-${issue.status}">${issue.status}</span></td>
             <td><code class="rule-key">${esc(issue.rule)}</code></td>
@@ -1479,6 +1492,84 @@ function renderScanIssues() {
     if (btnNext)  { btnNext.disabled = state.scanPage >= totalPages; }
     pagination?.classList.toggle('hidden', totalPages <= 1);
     updateScanSelectionUI();
+}
+
+/* ── Scan file-filter dropdown ────────────────────────────────────── */
+document.getElementById('scan-file-dropdown-btn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    const menu = document.getElementById('scan-file-dropdown-menu');
+    const opening = menu?.classList.contains('hidden');
+    menu?.classList.toggle('hidden');
+    if (opening) {
+        renderScanFileDropdown();
+        document.getElementById('scan-file-dropdown-search')?.focus();
+    }
+});
+document.addEventListener('click', e => {
+    if (!/** @type {HTMLElement} */(e.target).closest('.scan-file-dropdown-menu') &&
+        !/** @type {HTMLElement} */(e.target).closest('#scan-file-dropdown-btn')) {
+        document.getElementById('scan-file-dropdown-menu')?.classList.add('hidden');
+    }
+});
+document.getElementById('scan-file-dropdown-search')?.addEventListener('input', () => renderScanFileDropdown());
+
+document.querySelectorAll('#scan-file-dropdown-menu .sort-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        state.scanFileSort = /** @type {'name'|'count'} */ (/** @type {HTMLElement} */(btn).dataset.sort);
+        document.querySelectorAll('#scan-file-dropdown-menu .sort-toggle button')
+            .forEach(b => b.classList.toggle('active', b === btn));
+        renderScanFileDropdown();
+    });
+});
+
+/** Distinct file paths present in the current scan, with per-file issue counts. */
+function scanDistinctFiles() {
+    const counts = new Map();
+    for (const issue of state.scanIssues) {
+        const file = scanIssueFilePath(issue);
+        counts.set(file, (counts.get(file) || 0) + 1);
+    }
+    const entries = [...counts.entries()];
+    return state.scanFileSort === 'count'
+        ? entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        : entries.sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function renderScanFileDropdown() {
+    const list = document.getElementById('scan-file-dropdown-list');
+    if (!list) { return; }
+    const q = (/** @type {HTMLInputElement} */(document.getElementById('scan-file-dropdown-search'))?.value || '').toLowerCase().trim();
+    const files = scanDistinctFiles().filter(([file]) => !q || file.toLowerCase().includes(q));
+
+    if (files.length === 0) {
+        list.innerHTML = '<div class="scan-file-dropdown-empty">No files match.</div>';
+        return;
+    }
+
+    list.innerHTML = files.map(([file, count]) => `
+        <label class="scan-file-check" title="${esc(file)}">
+            <input type="checkbox" class="scan-file-filter-check" value="${esc(file)}" ${state.scanFileFilter.has(file) ? 'checked' : ''}>
+            <span class="scan-file-path">${esc(file)}</span>
+            <span class="scan-file-count">${count}</span>
+        </label>`).join('');
+
+    list.querySelectorAll('.scan-file-filter-check').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const value = /** @type {HTMLInputElement} */(cb).value;
+            if (/** @type {HTMLInputElement} */(cb).checked) { state.scanFileFilter.add(value); }
+            else { state.scanFileFilter.delete(value); }
+            updateScanFileDropdownLabel();
+            state.scanPage = 1;
+            renderScanIssues();
+        });
+    });
+}
+
+function updateScanFileDropdownLabel() {
+    const btn = document.getElementById('scan-file-dropdown-btn');
+    if (!btn) { return; }
+    const n = state.scanFileFilter.size;
+    btn.textContent = n === 0 ? 'File: All ▾' : `File: ${n} selected ▾`;
 }
 
 /* ══════════════════════════════════════════════════════════════════
